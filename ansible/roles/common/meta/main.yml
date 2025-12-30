@@ -1,0 +1,29 @@
+---
+galaxy_info:
+  author: DevOps Team
+  description: Common system setup role for patching, tool installation, and SSH key management
+  company: s3-batch-operations
+
+  license: MIT
+
+  min_ansible_version: "2.9"
+
+  platforms:
+    - name: EL
+      versions:
+        - all
+    - name: Ubuntu
+      versions:
+        - all
+    - name: Debian
+      versions:
+        - all
+
+  galaxy_tags:
+    - system
+    - common
+    - patching
+    - ssh
+    - tools
+
+dependencies: []

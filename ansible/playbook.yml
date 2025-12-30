@@ -1,0 +1,55 @@
+---
+- name: Setup EC2 instance with common tools and users
+  hosts: all
+  become: yes
+  gather_facts: false
+  vars:
+    ansible_pkg_mgr: yum
+  pre_tasks:
+    - name: Wait for Python 3.9 to be installed (user_data script completion)
+      raw: |
+        timeout=300
+        elapsed=0
+        while [ $elapsed -lt $timeout ]; do
+          if [ -f /usr/local/bin/python3 ] && /usr/local/bin/python3 --version 2>&1 | grep -q "Python 3.9"; then
+            echo "Python 3.9 is ready"
+            exit 0
+          fi
+          sleep 10
+          elapsed=$((elapsed + 10))
+        done
+        echo "Timeout waiting for Python 3.9"
+        exit 1
+      register: python_wait
+      changed_when: false
+    
+    - name: Add host with Python 3.9 interpreter
+      add_host:
+        name: "{{ inventory_hostname }}"
+        groups: python39_ready
+        ansible_python_interpreter: /usr/local/bin/python3
+        ansible_host: "{{ ansible_host }}"
+        ansible_user: "{{ ansible_user }}"
+        ansible_ssh_private_key_file: "{{ ansible_ssh_private_key_file }}"
+        ansible_ssh_common_args: "{{ ansible_ssh_common_args }}"
+    
+- name: Setup EC2 instance with common tools and users (Python 3.9)
+  hosts: python39_ready
+  become: yes
+  gather_facts: true
+  vars:
+    ansible_pkg_mgr: yum
+  pre_tasks:
+    - name: Display Python interpreter being used
+      debug:
+        msg: "Using Python interpreter: {{ ansible_python_interpreter }}"
+    
+    - name: Set package manager fact for Amazon Linux 2
+      set_fact:
+        ansible_pkg_mgr: yum
+      when: ansible_os_family == "RedHat"
+
+  roles:
+    - common
+    - geerlingguy.jenkins
+

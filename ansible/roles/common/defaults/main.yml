@@ -1,0 +1,22 @@
+---
+# defaults file for common
+
+# List of users to create and configure SSH keys for
+# Example:
+# common_users:
+#   - user: liman
+#     comment: "Liman Alhassan"
+#     public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAB..."
+#     key_comment: "Liman's key"
+#     groups: ["wheel", "docker"]
+#   - user: john
+#     comment: "John Doe"
+#     public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAB..."
+#     key_comment: "John's key"
+common_users: []
+
+# Whether to update system packages
+common_update_packages: true
+
+# Whether to install basic tools
+common_install_tools: true

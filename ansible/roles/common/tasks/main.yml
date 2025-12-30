@@ -1,0 +1,112 @@
+---
+# tasks file for common
+
+- name: Update system packages
+  ansible.builtin.command:
+    cmd: yum update -y
+  become: yes
+  when: 
+    - ansible_os_family == "RedHat"
+    - common_update_packages | bool
+
+- name: Update system packages (Debian/Ubuntu)
+  apt:
+    upgrade: dist
+    update_cache: yes
+  become: yes
+  when: 
+    - ansible_os_family == "Debian"
+    - common_update_packages | bool
+
+- name: Install basic tools
+  ansible.builtin.command:
+    cmd: yum install -y git wget curl vim unzip htop net-tools jq python3-pip
+  become: yes
+  when: 
+    - ansible_os_family == "RedHat"
+    - common_install_tools | bool
+
+- name: Install basic tools (Debian/Ubuntu)
+  apt:
+    name:
+      - git
+      - wget
+      - curl
+      - vim
+      - unzip
+      - htop
+      - net-tools
+      - jq
+      - python3-pip
+    state: present
+    update_cache: yes
+  become: yes
+  when: 
+    - ansible_os_family == "Debian"
+    - common_install_tools | bool
+
+- name: Install Java 17 (Amazon Corretto) for Jenkins
+  ansible.builtin.command:
+    cmd: yum install -y java-17-amazon-corretto java-17-amazon-corretto-devel
+  become: yes
+  when: 
+    - ansible_os_family == "RedHat"
+    - common_install_java | default(true) | bool
+  register: java_install
+
+- name: Set Java 17 as default Java
+  ansible.builtin.command:
+    cmd: alternatives --set java /usr/lib/jvm/java-17-amazon-corretto.x86_64/bin/java
+  become: yes
+  when: 
+    - ansible_os_family == "RedHat"
+    - common_install_java | default(true) | bool
+    - java_install.changed
+
+- name: Create users
+  user:
+    name: "{{ item.user }}"
+    comment: "{{ item.comment | default('User created by Ansible') }}"
+    shell: /bin/bash
+    create_home: yes
+    home: "{{ item.home | default('/home/' + item.user) }}"
+    groups: "{{ item.groups | default([]) }}"
+    append: yes
+  loop: "{{ common_users }}"
+  become: yes
+  when: common_users is defined
+
+- name: Ensure .ssh directory exists
+  file:
+    path: "{{ item.home | default('/home/' + item.user) }}/.ssh"
+    state: directory
+    mode: '0700'
+    owner: "{{ item.user }}"
+    group: "{{ item.user }}"
+  loop: "{{ common_users }}"
+  become: yes
+  when: common_users is defined
+
+- name: Add authorized keys for users
+  authorized_key:
+    user: "{{ item.user }}"
+    state: present
+    key: "{{ item.public_key }}"
+    comment: "{{ item.key_comment | default(item.comment | default('Added by Ansible')) }}"
+  loop: "{{ common_users }}"
+  become: yes
+  when: 
+    - common_users is defined
+    - item.public_key is defined
+
+- name: Set correct permissions on authorized_keys
+  file:
+    path: "{{ item.home | default('/home/' + item.user) }}/.ssh/authorized_keys"
+    mode: '0600'
+    owner: "{{ item.user }}"
+    group: "{{ item.user }}"
+  loop: "{{ common_users }}"
+  become: yes
+  when: 
+    - common_users is defined
+    - item.public_key is defined

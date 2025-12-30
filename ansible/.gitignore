@@ -1,0 +1,7 @@
+# Ignore sensitive variable files
+group_vars/all.yml
+
+# Ansible temporary files
+*.retry
+.ansible/
+

@@ -1,0 +1,36 @@
+---
+# Example variables file - copy to all.yml and update with your values
+# cp group_vars/all.yml.example group_vars/all.yml
+
+# User SSH keys and accounts
+common_users:
+  - user: liman
+    comment: "Liman Alhassan"
+    public_key: "YOUR_SSH_PUBLIC_KEY_HERE"  # Replace with your actual SSH public key
+    key_comment: "Liman's key"
+    groups: ["wheel"]  # Add to wheel group for sudo access
+  # Add more users as needed:
+  # - user: another_user
+  #   comment: "Another User Name"
+  #   public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAB..."
+  #   key_comment: "Another user's key"
+  #   groups: ["wheel"]
+
+# Jenkins configuration
+jenkins_hostname: "0.0.0.0"  # Hostname for Jenkins (usually localhost or 0.0.0.0)
+jenkins_http_port: 8080  # HTTP port for Jenkins web interface
+jenkins_plugin_timeout: 300  # Plugin installation timeout in seconds (default: 30, increase for large plugins)
+jenkins_plugins_install_dependencies: true  # Automatically install plugin dependencies
+jenkins_plugins_state: present  # 'present' keeps current versions, 'latest' always updates
+jenkins_prefer_lts: false  # Set to true to install LTS version instead of latest
+jenkins_connection_delay: 5  # Seconds to wait between connection retries
+jenkins_connection_retries: 60  # Number of retries when connecting to Jenkins (total wait = delay * retries)
+jenkins_plugins:
+  - blueocean
+  - workflow-aggregator
+  - git
+  - github
+  # You can also pin specific plugin versions:
+  # - name: influxdb
+  #   version: "1.12.1"
+
