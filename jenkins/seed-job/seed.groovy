@@ -36,7 +36,56 @@ pipelineJob('S3-Batch-Operations/Dev/Example-Pipeline') {
     
     definition {
         cps {
-            script(readFileFromWorkspace('jenkins/pipelines/example.groovy'))
+            script('''
+                pipeline {
+                    agent any
+                    
+                    options {
+                        buildDiscarder(logRotator(numToKeepStr: '10'))
+                        timestamps()
+                    }
+                    
+                    stages {
+                        stage('Hello') {
+                            steps {
+                                echo 'Hello from Job DSL!'
+                                echo "This pipeline was created by the seed job"
+                            }
+                        }
+                        
+                        stage('Environment Info') {
+                            steps {
+                                script {
+                                    echo "Jenkins URL: ${env.JENKINS_URL}"
+                                    echo "Job Name: ${env.JOB_NAME}"
+                                    echo "Build Number: ${env.BUILD_NUMBER}"
+                                    echo "Workspace: ${env.WORKSPACE}"
+                                }
+                            }
+                        }
+                        
+                        stage('AWS Info') {
+                            steps {
+                                script {
+                                    echo "AWS operations would go here"
+                                }
+                            }
+                        }
+                    }
+                    
+                    post {
+                        always {
+                            echo 'Pipeline completed!'
+                        }
+                        success {
+                            echo 'Pipeline succeeded!'
+                        }
+                        failure {
+                            echo 'Pipeline failed!'
+                        }
+                    }
+                }
+            ''')
             sandbox(true)
         }
     }
