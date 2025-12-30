@@ -25,11 +25,15 @@ If not installed:
 
 ### Step 2: Create the Seed Job
 
+**⚠️ CRITICAL: The seed job MUST be a Freestyle project, NOT a Pipeline!**
+
 1. Go to Jenkins home page
 2. Click **New Item** (or **Create a job**)
 3. Enter name: `seed-job`
-4. Select **Freestyle project**
+4. **IMPORTANT**: Select **Freestyle project** (NOT Pipeline!)
 5. Click **OK**
+
+**Why Freestyle?** Job DSL only works in Freestyle jobs with "Process Job DSLs" build step. Pipeline jobs don't support `readFileFromWorkspace` in the same way.
 
 ### Step 3: Configure Source Code Management
 
@@ -73,8 +77,21 @@ If not installed:
 2. Click **Add build step** → **Process Job DSLs**
 3. Configure:
    - **DSL Scripts**: `jenkins/seed-job/seed.groovy`
-   - ☑ **Use Groovy Sandbox** (recommended for security)
+   - **Use Groovy Sandbox**: 
+     - ☑ Check this box (recommended for security)
+     - **BUT**: You must also configure "Run as specific user" (see below)
    - **Additional classpath**: (leave empty unless needed)
+
+### Step 5b: Configure Job to Run as Specific User (Required for Sandbox)
+
+**IMPORTANT**: If you enable Groovy Sandbox, you MUST configure the job to run as a specific user.
+
+1. Scroll to **Build Environment** section (above Build steps)
+2. ☑ Check **Run as specific user**
+3. Enter a username (e.g., `admin` or your Jenkins username)
+4. This is required for Groovy Sandbox security
+
+**Alternative**: If you don't want to configure a user, uncheck "Use Groovy Sandbox" (less secure but works)
 
 ### Step 6: Save and Run
 
@@ -110,6 +127,31 @@ If you want automatic updates when you push to Git:
 6. Click **Add webhook**
 
 ## Troubleshooting
+
+### "You must configure the DSL job to run as a specific user"
+
+**Problem**: Groovy Sandbox is enabled but job is running as SYSTEM
+
+**Solution**:
+1. Go to seed-job → **Configure**
+2. Scroll to **Build Environment** section
+3. ☑ Check **Run as specific user**
+4. Enter your Jenkins username (e.g., `admin`)
+5. Save and run again
+
+**Alternative**: Uncheck "Use Groovy Sandbox" in the Job DSL build step (less secure but works without user config)
+
+### "No such DSL method 'readFileFromWorkspace' found"
+
+**Problem**: Seed job is configured as a Pipeline instead of Freestyle
+
+**Solution**:
+1. Delete the seed job
+2. Recreate it as a **Freestyle project** (NOT Pipeline!)
+3. Add "Process Job DSLs" build step
+4. Run again
+
+**Alternative**: Use `seed-inline.groovy` which has everything in one file (no file reading needed)
 
 ### Seed Job Fails with "File not found"
 
