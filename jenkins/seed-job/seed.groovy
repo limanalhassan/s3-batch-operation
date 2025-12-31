@@ -1,21 +1,3 @@
-/**
- * Main Seed Job Script
- * 
- * This is the entry point for the Job DSL seed job.
- * It loads and executes other Groovy files to create folders, jobs, and views.
- * 
- * How it works:
- * 1. Seed job checks out this repository
- * 2. Runs this script (seed.groovy)
- * 3. This script loads folders.groovy, jobs.groovy, etc.
- * 4. Those scripts create the actual Jenkins items
- * 
- * NOTE: If you get "No signature of method" errors, use seed-inline.groovy instead,
- * or configure the Job DSL build step to use "Look on Filesystem" option.
- */
-
-// Directly include the folder definitions
-// This creates the folder structure in Jenkins
 folder('S3-Batch-Operations') {
     displayName('S3 Batch Operations')
     description('All jobs related to S3 batch operations (copy, restore, inventory, etc.)')
@@ -28,94 +10,7 @@ folder('S3-Batch-Operations/Dev') {
 
 println("Folders created successfully!")
 
-// Directly include job definitions
-// This creates the actual Jenkins jobs
-pipelineJob('S3-Batch-Operations/Dev/Example-Pipeline') {
-    displayName('Example Pipeline Job')
-    description('An example pipeline job to demonstrate Job DSL')
-    
-    definition {
-        cps {
-            script('''
-                pipeline {
-                    agent any
-                    
-                    options {
-                        buildDiscarder(logRotator(numToKeepStr: '10'))
-                        timestamps()
-                    }
-                    
-                    stages {
-                        stage('Hello') {
-                            steps {
-                                echo 'Hello from Job DSL!'
-                                echo "This pipeline was created by the seed job"
-                            }
-                        }
-                        
-                        stage('Environment Info') {
-                            steps {
-                                script {
-                                    echo "Jenkins URL: ${env.JENKINS_URL}"
-                                    echo "Job Name: ${env.JOB_NAME}"
-                                    echo "Build Number: ${env.BUILD_NUMBER}"
-                                    echo "Workspace: ${env.WORKSPACE}"
-                                }
-                            }
-                        }
-                        
-                        stage('AWS Info') {
-                            steps {
-                                script {
-                                    echo "AWS operations would go here"
-                                }
-                            }
-                        }
-                    }
-                    
-                    post {
-                        always {
-                            echo 'Pipeline completed!'
-                        }
-                        success {
-                            echo 'Pipeline succeeded!'
-                        }
-                        failure {
-                            echo 'Pipeline failed!'
-                        }
-                    }
-                }
-            ''')
-            sandbox(true)
-        }
-    }
-    
-    triggers {
-        cron('H * * * *')
-    }
-    
-    parameters {
-        stringParam('BUCKET_NAME', 'my-bucket', 'S3 bucket name')
-        choiceParam('ENVIRONMENT', ['dev', 'staging', 'prod'], 'Target environment')
-    }
-}
-
-freeStyleJob('S3-Batch-Operations/Dev/Example-Freestyle') {
-    displayName('Example Freestyle Job')
-    description('An example freestyle job')
-    
-    steps {
-        shell('''
-            echo "Hello from Job DSL!"
-            echo "This is a freestyle job created by the seed job"
-        ''')
-    }
-    
-    publishers {
-        archiveArtifacts('**/*')
-    }
-}
-
+// S3 Copy Job - References Jenkinsfile from jenkins/pipelines/
 pipelineJob('S3-Batch-Operations/Dev/S3-Copy') {
     displayName('S3 Copy Operation')
     description('Copy objects from source to destination bucket')
@@ -129,56 +24,9 @@ pipelineJob('S3-Batch-Operations/Dev/S3-Copy') {
     
     definition {
         cps {
-            script('''
-                pipeline {
-                    agent any
-                    stages {
-                        stage('Copy S3 Objects') {
-                            steps {
-                                script {
-                                    echo "Copying from ${SOURCE_BUCKET} to ${DEST_BUCKET}"
-                                }
-                            }
-                        }
-                    }
-                }
-            ''')
+            script(readFileFromWorkspace('jenkins/pipelines/s3-copy.groovy'))
             sandbox(true)
         }
-    }
-}
-
-pipelineJob('S3-Batch-Operations/Dev/S3-Inventory') {
-    displayName('S3 Inventory Report')
-    description('Generate inventory report for S3 buckets')
-    
-    parameters {
-        stringParam('BUCKET_NAME', '', 'S3 bucket name to inventory')
-        choiceParam('REPORT_FORMAT', ['json', 'csv'], 'Report format')
-    }
-    
-    definition {
-        cps {
-            script('''
-                pipeline {
-                    agent any
-                    stages {
-                        stage('Generate Inventory') {
-                            steps {
-                                script {
-                                    echo "Generating inventory for ${BUCKET_NAME}"
-                                }
-                            }
-                        }
-                    }
-                }
-            ''')
-            sandbox(true)
-        }
-    }
-    
-    triggers {
-        cron('0 2 * * *')
     }
 }
 

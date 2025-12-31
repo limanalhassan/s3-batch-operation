@@ -20,21 +20,29 @@ A **seed job** is a Jenkins job that uses the [Job DSL Plugin](https://plugins.j
 jenkins/
 ├── README.md                    # This file
 ├── seed-job/                    # Seed job scripts
-│   ├── seed.groovy             # Main seed script (entry point)
-│   ├── folders.groovy          # Folder definitions
-│   ├── jobs.groovy             # Job definitions
-│   └── views.groovy            # View definitions (optional)
+│   └── seed.groovy             # Main seed script - creates pipeline jobs
 └── pipelines/                   # Actual pipeline Jenkinsfiles
-    └── (your Jenkinsfiles go here)
+    ├── s3-copy.groovy          # S3 Copy pipeline definition
+    └── (other Jenkinsfiles go here)
 ```
+
+**Key Concept:**
+- `seed.groovy` - Creates and manages pipeline jobs (Job DSL)
+- `jenkins/pipelines/*.groovy` - Contains the actual pipeline logic (Jenkinsfiles)
+- Seed job references Jenkinsfiles from `jenkins/pipelines/` directory
 
 ## How It Works
 
 1. **Install Job DSL Plugin** (via Ansible)
 2. **Create Seed Job** manually (one-time setup)
 3. **Seed Job Runs** → Checks out this repo → Executes `seed.groovy`
-4. **seed.groovy** → Loads `folders.groovy`, `jobs.groovy`, etc.
-5. **Folders & Jobs Created** automatically in Jenkins
+4. **seed.groovy** → Creates folders and pipeline jobs
+5. **Pipeline Jobs** → Reference Jenkinsfiles from `jenkins/pipelines/`
+6. **Folders & Jobs Created** automatically in Jenkins
+
+**Separation of Concerns:**
+- **seed.groovy**: Job configuration (parameters, triggers, etc.) - Infrastructure as Code
+- **jenkins/pipelines/*.groovy**: Pipeline logic (stages, steps, etc.) - Application code
 
 ## Setup Instructions
 
@@ -96,12 +104,40 @@ pipelineJob('S3-Batch-Operations/Dev/Example-Pipeline') {
 }
 ```
 
-## Adding New Jobs
+## Adding New Pipeline Jobs
 
-1. Edit `jenkins/seed-job/jobs.groovy`
-2. Add your job definition
+### Step 1: Create the Jenkinsfile
+1. Create a new file in `jenkins/pipelines/` (e.g., `my-pipeline.groovy`)
+2. Write your pipeline definition (standard Jenkinsfile syntax)
+3. Commit to Git
+
+### Step 2: Add Job Definition to seed.groovy
+1. Edit `jenkins/seed-job/seed.groovy`
+2. Add a `pipelineJob` block that references your Jenkinsfile:
+   ```groovy
+   pipelineJob('S3-Batch-Operations/Dev/My-Pipeline') {
+       displayName('My Pipeline')
+       description('Description of what this pipeline does')
+       
+       parameters {
+           stringParam('PARAM1', 'default', 'Parameter description')
+       }
+       
+       definition {
+           cps {
+               script(readFileFromWorkspace('jenkins/pipelines/my-pipeline.groovy'))
+               sandbox(true)
+           }
+       }
+   }
+   ```
 3. Commit and push to Git
 4. Seed job will automatically pick it up (if polling) or trigger manually
+
+**Benefits:**
+- Pipeline logic is separate from job configuration
+- Easy to version control and review pipeline changes
+- Can reuse same Jenkinsfile for multiple jobs if needed
 
 ## Learning Resources
 
