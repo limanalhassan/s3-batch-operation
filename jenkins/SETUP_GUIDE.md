@@ -163,14 +163,19 @@ If you want automatic updates when you push to Git:
 - Ensure the branch is correct in SCM config
 - Try using absolute path: `**/seed.groovy`
 
-### "Script not approved" Error
+### "Script not yet approved for use" Error
 
-**Problem**: Groovy sandbox is blocking the script
+**Problem**: Jenkins requires script approval when using Groovy Sandbox
 
 **Solution**:
 1. Go to **Manage Jenkins** → **In-process Script Approval**
-2. Approve the pending scripts
-3. Re-run the seed job
+2. You'll see pending script approvals
+3. Click **Approve** for each pending script
+4. Re-run the seed job
+
+**Alternative (Less Secure)**: Uncheck "Use Groovy Sandbox" in the Job DSL build step configuration
+
+**Note**: You may need to approve scripts multiple times as the seed job evolves. This is normal Jenkins security behavior.
 
 ### Jobs Created But Not Visible
 
