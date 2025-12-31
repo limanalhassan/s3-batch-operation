@@ -28,6 +28,11 @@ pipelineJob('S3-Batch-Operations/Dev/S3-Copy') {
             sandbox(true)
         }
     }
+    
+    triggers {
+        // Run on SCM changes (when code is pushed to repository)
+        scm('H/5 * * * *')  // Poll every 5 minutes
+    }
 }
 
 println("Jobs created successfully!")
