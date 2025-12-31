@@ -86,6 +86,46 @@ module "security_group" {
     }
   ]
 
+  # Restrict egress to only necessary ports
+  # This overrides the default "allow all" egress rule
+  egress_rules = [
+    {
+      description = "HTTPS to internet (for package updates, AWS APIs)"
+      from_port   = 443
+      to_port     = 443
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    },
+    {
+      description = "HTTP to internet (for package updates)"
+      from_port   = 80
+      to_port     = 80
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    },
+    {
+      description = "DNS (UDP)"
+      from_port   = 53
+      to_port     = 53
+      protocol    = "udp"
+      cidr_blocks = ["0.0.0.0/0"]
+    },
+    {
+      description = "DNS (TCP)"
+      from_port   = 53
+      to_port     = 53
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    },
+    {
+      description = "NTP (time synchronization)"
+      from_port   = 123
+      to_port     = 123
+      protocol    = "udp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  ]
+
   tags = local.common_tags
 }
 
