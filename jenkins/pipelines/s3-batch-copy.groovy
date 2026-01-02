@@ -434,11 +434,11 @@ pipeline {
                             
                             def manifestGeneratorMap = [
                                 S3JobManifestGenerator: [
-                                    ExpectedBucketOwner: env.ACCOUNT_NUMBER,
+                                    ExpectedBucketOwner: "${env.ACCOUNT_NUMBER}",  // Must be string
                                     SourceBucket: env.SOURCE_BUCKET,  // Bucket name, not ARN
                                     EnableManifestOutput: true,
                                     ManifestOutputLocation: [
-                                        ExpectedManifestBucketOwner: env.ACCOUNT_NUMBER,
+                                        ExpectedManifestBucketOwner: "${env.ACCOUNT_NUMBER}",  // Must be string
                                         Bucket: env.MANIFEST_BUCKET,  // Bucket name, not ARN
                                         ManifestPrefix: "manifests/",
                                         ManifestFormat: "S3InventoryReport_CSV_20211130"
