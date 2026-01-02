@@ -367,26 +367,59 @@ pipeline {
                                 '{}'
                             def destPath = params.DEST_PREFIX ? "${params.DEST_PREFIX}/" : ""
                             
-                            def operationJson = """{"S3CopyObject":{"TargetResource":"arn:aws:s3:::${env.DEST_BUCKET}/${destPath}","CannedAccessControlList":"private","MetadataDirective":"COPY","TaggingDirective":"COPY"}}"""
-                            def manifestGeneratorJson = """{"S3JobManifestGenerator":{"ExpectedBucketOwner":"${env.ACCOUNT_NUMBER}","SourceBucket":"arn:aws:s3:::${env.SOURCE_BUCKET}","EnableManifestOutput":true,"ManifestOutputLocation":{"ExpectedManifestBucketOwner":"${env.ACCOUNT_NUMBER}","Bucket":"arn:aws:s3:::${env.MANIFEST_BUCKET}","ManifestPrefix":"manifests/","ManifestFormat":"S3InventoryReport_CSV_20211130"},"Filter":${filterJson}}}"""
-                            def reportJson = """{"Bucket":"arn:aws:s3:::${env.REPORT_BUCKET}","Prefix":"reports/","Format":"Report_CSV_20180820","Enabled":true,"ReportScope":"AllTasks"}"""
+                            // Build JSON using Groovy maps for proper formatting
+                            def operationMap = [
+                                S3CopyObject: [
+                                    TargetResource: "arn:aws:s3:::${env.DEST_BUCKET}/${destPath}",
+                                    CannedAccessControlList: "private",
+                                    MetadataDirective: "COPY",
+                                    TaggingDirective: "COPY"
+                                ]
+                            ]
                             
-                            def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
-                            writeFile file: 'operation.json', text: operationJson
-                            writeFile file: 'report.json', text: reportJson
-                            writeFile file: 'manifest-generator.json', text: manifestGeneratorJson
+                            def manifestGeneratorMap = [
+                                S3JobManifestGenerator: [
+                                    ExpectedBucketOwner: env.ACCOUNT_NUMBER,
+                                    SourceBucket: "arn:aws:s3:::${env.SOURCE_BUCKET}",
+                                    EnableManifestOutput: true,
+                                    ManifestOutputLocation: [
+                                        ExpectedManifestBucketOwner: env.ACCOUNT_NUMBER,
+                                        Bucket: "arn:aws:s3:::${env.MANIFEST_BUCKET}",
+                                        ManifestPrefix: "manifests/",
+                                        ManifestFormat: "S3InventoryReport_CSV_20211130"
+                                    ]
+                                ]
+                            ]
                             
-                            // Show the JSON files for debugging
-                            sh """
-                                echo "=== Operation JSON ==="
-                                cat operation.json
-                                echo ""
-                                echo "=== Manifest Generator JSON ==="
-                                cat manifest-generator.json
-                                echo ""
-                                echo "=== Report JSON ==="
-                                cat report.json
-                            """
+                            // Add Filter only if SOURCE_PREFIX is provided
+                            if (params.SOURCE_PREFIX) {
+                                manifestGeneratorMap.S3JobManifestGenerator.Filter = [
+                                    KeyNameConstraint: [
+                                        MatchAnyPrefix: [params.SOURCE_PREFIX]
+                                    ]
+                                ]
+                            }
+                            
+                            def reportMap = [
+                                Bucket: "arn:aws:s3:::${env.REPORT_BUCKET}",
+                                Prefix: "reports/",
+                                Format: "Report_CSV_20180820",
+                                Enabled: true,
+                                ReportScope: "AllTasks"
+                            ]
+                            
+                            // Convert to JSON strings
+                            def operationJson = groovy.json.JsonOutput.toJson(operationMap)
+                            def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap)
+                            def reportJson = groovy.json.JsonOutput.toJson(reportMap)
+                            
+                            // Show the JSON for debugging
+                            echo "=== Operation JSON ==="
+                            echo operationJson
+                            echo "=== Manifest Generator JSON ==="
+                            echo manifestGeneratorJson
+                            echo "=== Report JSON ==="
+                            echo reportJson
                             
                             def jobOutput = ''
                             retry(3) {
@@ -394,9 +427,9 @@ pipeline {
                                     script: """
                                         aws s3control create-job \
                                             --account-id ${env.ACCOUNT_NUMBER} \
-                                            --operation file://${workspacePath}/operation.json \
-                                            --manifest file://${workspacePath}/manifest-generator.json \
-                                            --report file://${workspacePath}/report.json \
+                                            --operation '${operationJson}' \
+                                            --manifest-generator '${manifestGeneratorJson}' \
+                                            --report '${reportJson}' \
                                             --priority ${params.PRIORITY} \
                                             --role-arn ${role3Arn} \
                                             --region ${params.REGION} \
