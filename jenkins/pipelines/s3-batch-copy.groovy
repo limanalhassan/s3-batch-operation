@@ -9,7 +9,7 @@ pipeline {
     parameters {
         string(name: 'ACCOUNT_NUMBER', defaultValue: '', description: 'AWS Account Number')
         string(name: 'ACCOUNT_NAME', defaultValue: '', description: 'Account Name')
-        string(name: 'S3_BATCH_INFRA_ROLE_ARN', defaultValue: '', description: 'ARN of Role 2 (S3 Batch Infrastructure Role)')
+        string(name: 'S3_BATCH_INFRA_ROLE_NAME', defaultValue: '', description: 'Name of Role 2 (S3 Batch Infrastructure Role)')
         string(name: 'ENV_TAG', defaultValue: '', description: 'Environment tag value to filter buckets (e.g., dev, staging, prod)')
         string(name: 'SOURCE_PREFIX', defaultValue: '', description: 'Bucket prefix to copy from')
         string(name: 'DEST_PREFIX', defaultValue: '', description: 'Bucket prefix to copy to')
@@ -19,6 +19,7 @@ pipeline {
     
     environment {
         OPERATION_TAG = 's3BatchOperations'
+        S3_BATCH_INFRA_ROLE_ARN = "arn:aws:iam::${params.ACCOUNT_NUMBER}:role/${params.S3_BATCH_INFRA_ROLE_NAME}"
         REPORT_BUCKET = "${params.ACCOUNT_NAME}-report-${params.ACCOUNT_NAME}"
         MANIFEST_BUCKET = "${params.ACCOUNT_NAME}-manifest-${params.ACCOUNT_NAME}"
         BATCH_JOB_ROLE_NAME = "${params.ACCOUNT_NAME}-batch-job-role"
@@ -29,8 +30,8 @@ pipeline {
         stage('Validate Parameters') {
             steps {
                 script {
-                    if (!params.ACCOUNT_NUMBER || !params.ACCOUNT_NAME || !params.S3_BATCH_INFRA_ROLE_ARN || !params.ENV_TAG) {
-                        error('ACCOUNT_NUMBER, ACCOUNT_NAME, S3_BATCH_INFRA_ROLE_ARN, and ENV_TAG are required parameters')
+                    if (!params.ACCOUNT_NUMBER || !params.ACCOUNT_NAME || !params.S3_BATCH_INFRA_ROLE_NAME || !params.ENV_TAG) {
+                        error('ACCOUNT_NUMBER, ACCOUNT_NAME, S3_BATCH_INFRA_ROLE_NAME, and ENV_TAG are required parameters')
                     }
                 }
             }
@@ -106,7 +107,7 @@ pipeline {
         stage('Create Report Bucket') {
             steps {
                 script {
-                    withAWS(role: params.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
+                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
                         retry(3) {
                             def bucketExists = sh(
                                 script: "aws s3api head-bucket --bucket ${env.REPORT_BUCKET} --region ${params.REGION} 2>&1",
@@ -135,7 +136,7 @@ pipeline {
         stage('Create Manifest Bucket') {
             steps {
                 script {
-                    withAWS(role: params.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
+                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
                         retry(3) {
                             def bucketExists = sh(
                                 script: "aws s3api head-bucket --bucket ${env.MANIFEST_BUCKET} --region ${params.REGION} 2>&1",
@@ -164,7 +165,7 @@ pipeline {
         stage('Create Batch Job Role') {
             steps {
                 script {
-                    withAWS(role: params.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
+                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
                         def trustPolicy = '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"batchoperations.s3.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
                         
                         retry(3) {
@@ -269,7 +270,7 @@ pipeline {
         stage('Create S3 Batch Job') {
             steps {
                 script {
-                    withAWS(role: params.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
+                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
                         def role3Arn = "arn:aws:iam::${params.ACCOUNT_NUMBER}:role/${env.BATCH_JOB_ROLE_NAME}"
                         def filterJson = params.SOURCE_PREFIX ? 
                             """{"KeyNameConstraint":{"MatchAnyPrefix":["${params.SOURCE_PREFIX}"]}}""" : 
