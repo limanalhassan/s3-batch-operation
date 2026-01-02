@@ -408,18 +408,26 @@ pipeline {
                                 ReportScope: "AllTasks"
                             ]
                             
-                            // Convert to JSON strings
+                            // Convert to JSON and write to files (more reliable than passing as strings)
+                            def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
+                            
                             def operationJson = groovy.json.JsonOutput.toJson(operationMap)
                             def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap)
                             def reportJson = groovy.json.JsonOutput.toJson(reportMap)
                             
+                            // Write JSON to files
+                            writeFile file: 'operation.json', text: operationJson
+                            writeFile file: 'manifest-generator.json', text: manifestGeneratorJson
+                            writeFile file: 'report.json', text: reportJson
+                            writeFile file: 'manifest.json', text: '{}'
+                            
                             // Show the JSON for debugging
                             echo "=== Operation JSON ==="
-                            echo operationJson
+                            sh "cat operation.json"
                             echo "=== Manifest Generator JSON ==="
-                            echo manifestGeneratorJson
+                            sh "cat manifest-generator.json"
                             echo "=== Report JSON ==="
-                            echo reportJson
+                            sh "cat report.json"
                             
                             def jobOutput = ''
                             retry(3) {
@@ -427,10 +435,10 @@ pipeline {
                                     script: """
                                         aws s3control create-job \
                                             --account-id ${env.ACCOUNT_NUMBER} \
-                                            --operation '${operationJson}' \
-                                            --manifest-generator '${manifestGeneratorJson}' \
-                                            --manifest '{}' \
-                                            --report '${reportJson}' \
+                                            --operation file://${workspacePath}/operation.json \
+                                            --manifest-generator file://${workspacePath}/manifest-generator.json \
+                                            --manifest file://${workspacePath}/manifest.json \
+                                            --report file://${workspacePath}/report.json \
                                             --priority ${params.PRIORITY} \
                                             --role-arn ${role3Arn} \
                                             --region ${params.REGION} \
