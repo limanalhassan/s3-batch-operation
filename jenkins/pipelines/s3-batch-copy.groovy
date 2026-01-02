@@ -488,35 +488,32 @@ pipeline {
                             // Use AWS CLI v2 with --manifest-generator (requires AWS CLI v2.0.0+)
                             def jobOutput = ''
                             retry(3) {
-                                def exitCode = sh(
-                                    script: """
-                                        ${awsCmd} s3control create-job \
-                                            --account-id ${env.ACCOUNT_NUMBER} \
-                                            --operation file://${workspacePath}/operation.json \
-                                            --manifest-generator file://${workspacePath}/manifest-generator.json \
-                                            --report file://${workspacePath}/report.json \
-                                            --priority ${params.PRIORITY} \
-                                            --role-arn ${role3Arn} \
-                                            --region ${params.REGION} \
-                                            --no-confirmation-required \
-                                            --output json 2>&1
-                                    """,
-                                    returnStdout: true,
-                                    returnStatus: true
-                                )
-                                
-                                jobOutput = exitCode.output.trim()
-                                if (exitCode.exitValue != 0) {
-                                    echo "AWS CLI Error (exit code ${exitCode.exitValue}): ${jobOutput}"
-                                    // Continue to retry
+                                try {
+                                    jobOutput = sh(
+                                        script: """
+                                            ${awsCmd} s3control create-job \
+                                                --account-id ${env.ACCOUNT_NUMBER} \
+                                                --operation file://${workspacePath}/operation.json \
+                                                --manifest-generator file://${workspacePath}/manifest-generator.json \
+                                                --report file://${workspacePath}/report.json \
+                                                --priority ${params.PRIORITY} \
+                                                --role-arn ${role3Arn} \
+                                                --region ${params.REGION} \
+                                                --no-confirmation-required \
+                                                --output json 2>&1
+                                        """,
+                                        returnStdout: true
+                                    ).trim()
+                                    
+                                    // Check if output contains error
+                                    if (jobOutput.contains('An error occurred')) {
+                                        echo "AWS CLI Error: ${jobOutput}"
+                                        error("AWS CLI returned error: ${jobOutput}")
+                                    }
+                                } catch (Exception e) {
+                                    echo "Exception during job creation: ${e.getMessage()}"
+                                    throw e
                                 }
-                            }
-                            
-                            // Check if we got a successful response
-                            if (!jobOutput || jobOutput.contains('An error occurred')) {
-                                echo "=== Full Error Details ==="
-                                echo jobOutput
-                                error("Failed to create S3 batch job. Error: ${jobOutput}")
                             }
                             
                             def jobId = sh(
