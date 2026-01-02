@@ -5,44 +5,6 @@ def getAccountNumber(accountName) {
     return accountMap[accountName] ?: null
 }
 
-def assumeRoleAndSetEnv(roleArn, sessionName, region) {
-    def assumeRoleOutput = sh(
-        script: """
-            aws sts assume-role \
-                --role-arn ${roleArn} \
-                --role-session-name ${sessionName}-${env.BUILD_NUMBER} \
-                --region ${region} \
-                --output json
-        """,
-        returnStdout: true
-    ).trim()
-    
-    def accessKeyId = sh(
-        script: "echo '${assumeRoleOutput}' | jq -r '.Credentials.AccessKeyId'",
-        returnStdout: true
-    ).trim()
-    
-    def secretAccessKey = sh(
-        script: "echo '${assumeRoleOutput}' | jq -r '.Credentials.SecretAccessKey'",
-        returnStdout: true
-    ).trim()
-    
-    def sessionToken = sh(
-        script: "echo '${assumeRoleOutput}' | jq -r '.Credentials.SessionToken'",
-        returnStdout: true
-    ).trim()
-    
-    if (!accessKeyId || accessKeyId == 'null') {
-        error("Failed to assume role ${roleArn}. Output: ${assumeRoleOutput}")
-    }
-    
-    return [
-        "AWS_ACCESS_KEY_ID=${accessKeyId}",
-        "AWS_SECRET_ACCESS_KEY=${secretAccessKey}",
-        "AWS_SESSION_TOKEN=${sessionToken}",
-        "AWS_DEFAULT_REGION=${region}"
-    ]
-}
 
 pipeline {
     agent any
@@ -86,309 +48,273 @@ pipeline {
                     
                     echo "Account Name: ${params.ACCOUNT_NAME}"
                     echo "Account Number: ${env.ACCOUNT_NUMBER}"
+                    echo "Attempting to assume role: ${env.S3_BATCH_INFRA_ROLE_ARN}"
                 }
             }
         }
         
-        stage('Auto-detect Source and Destination Buckets') {
+        stage('AWS Operations') {
             steps {
                 script {
-                    def sourceBucket = null
-                    def destBucket = null
-                    
-                    echo "Testing if AWS CLI can access instance profile credentials..."
-                    def testIdentity = sh(
-                        script: "aws sts get-caller-identity --region ${params.REGION} 2>&1 || echo 'NO_CREDENTIALS'",
-                        returnStdout: true
-                    ).trim()
-                    
-                    if (testIdentity.contains('NO_CREDENTIALS') || testIdentity.contains('Unable to locate credentials')) {
-                        error("AWS CLI cannot access instance profile credentials. The EC2 instance may need to be rebooted for the instance profile to become accessible. Instance profile is attached but not yet accessible via metadata service.")
-                    }
-                    
-                    echo "Instance profile credentials available. Assuming role: ${env.S3_BATCH_INFRA_ROLE_ARN}"
-                    def awsEnv = assumeRoleAndSetEnv(env.S3_BATCH_INFRA_ROLE_ARN, 'jenkins-s3-batch-copy', params.REGION)
-                    
-                    withEnv(awsEnv) {
+                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy', region: params.REGION) {
                         echo "Successfully assumed role. Testing AWS credentials..."
                         sh "aws sts get-caller-identity"
                         
-                        retry(3) {
-                            def bucketsJson = sh(
-                                script: "aws s3api list-buckets --output json --region ${params.REGION}",
+                        stage('Auto-detect Source and Destination Buckets') {
+                            def sourceBucket = null
+                            def destBucket = null
+                            
+                            retry(3) {
+                                def bucketsJson = sh(
+                                    script: "aws s3api list-buckets --output json --region ${params.REGION}",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                def buckets = sh(
+                                    script: "echo '${bucketsJson}' | jq -r '.Buckets[].Name'",
+                                    returnStdout: true
+                                ).trim().split('\n')
+                                
+                                for (bucket in buckets) {
+                                    try {
+                                        def tagsJson = sh(
+                                            script: "aws s3api get-bucket-tagging --bucket ${bucket} --region ${params.REGION} --output json 2>&1",
+                                            returnStdout: true
+                                        ).trim()
+                                        
+                                        if (tagsJson && !tagsJson.contains('NoSuchTagSet')) {
+                                            def operationValue = sh(
+                                                script: "echo '${tagsJson}' | jq -r '.TagSet[] | select(.Key==\"operation\") | .Value'",
+                                                returnStdout: true
+                                            ).trim()
+                                            
+                                            def envValue = sh(
+                                                script: "echo '${tagsJson}' | jq -r '.TagSet[] | select(.Key==\"env\") | .Value'",
+                                                returnStdout: true
+                                            ).trim()
+                                            
+                                            def targetValue = sh(
+                                                script: "echo '${tagsJson}' | jq -r '.TagSet[] | select(.Key==\"Target\") | .Value'",
+                                                returnStdout: true
+                                            ).trim()
+                                            
+                                            if (operationValue == env.OPERATION_TAG && envValue == params.ENV_TAG) {
+                                                if (targetValue == 'Source') {
+                                                    sourceBucket = bucket
+                                                } else if (targetValue == 'Destination') {
+                                                    destBucket = bucket
+                                                }
+                                            }
+                                        }
+                                    } catch (Exception e) {
+                                        continue
+                                    }
+                                }
+                            }
+                            
+                            if (!sourceBucket) {
+                                error("Source bucket not found. Ensure a bucket exists with tags: operation=${env.OPERATION_TAG}, env=${params.ENV_TAG}, Target=Source")
+                            }
+                            if (!destBucket) {
+                                error("Destination bucket not found. Ensure a bucket exists with tags: operation=${env.OPERATION_TAG}, env=${params.ENV_TAG}, Target=Destination")
+                            }
+                            
+                            env.SOURCE_BUCKET = sourceBucket
+                            env.DEST_BUCKET = destBucket
+                            echo "Source Bucket: ${sourceBucket}"
+                            echo "Destination Bucket: ${destBucket}"
+                        }
+                        
+                        stage('Create Report Bucket') {
+                            retry(3) {
+                                def bucketExists = sh(
+                                    script: "aws s3api head-bucket --bucket ${env.REPORT_BUCKET} --region ${params.REGION} 2>&1",
+                                    returnStatus: true
+                                )
+                                
+                                if (bucketExists != 0) {
+                                    def createCmd = params.REGION == 'us-east-1' ? 
+                                        "aws s3api create-bucket --bucket ${env.REPORT_BUCKET} --region ${params.REGION}" :
+                                        "aws s3api create-bucket --bucket ${env.REPORT_BUCKET} --region ${params.REGION} --create-bucket-configuration LocationConstraint=${params.REGION}"
+                                    
+                                    sh """
+                                        ${createCmd}
+                                        aws s3api put-bucket-lifecycle-configuration \
+                                            --bucket ${env.REPORT_BUCKET} \
+                                            --lifecycle-configuration '{"Rules":[{"Id":"DeleteAfter7Days","Status":"Enabled","Expiration":{"Days":7}}]}' \
+                                            --region ${params.REGION}
+                                    """
+                                }
+                            }
+                        }
+                        
+                        stage('Create Manifest Bucket') {
+                            retry(3) {
+                                def bucketExists = sh(
+                                    script: "aws s3api head-bucket --bucket ${env.MANIFEST_BUCKET} --region ${params.REGION} 2>&1",
+                                    returnStatus: true
+                                )
+                                
+                                if (bucketExists != 0) {
+                                    def createCmd = params.REGION == 'us-east-1' ? 
+                                        "aws s3api create-bucket --bucket ${env.MANIFEST_BUCKET} --region ${params.REGION}" :
+                                        "aws s3api create-bucket --bucket ${env.MANIFEST_BUCKET} --region ${params.REGION} --create-bucket-configuration LocationConstraint=${params.REGION}"
+                                    
+                                    sh """
+                                        ${createCmd}
+                                        aws s3api put-bucket-lifecycle-configuration \
+                                            --bucket ${env.MANIFEST_BUCKET} \
+                                            --lifecycle-configuration '{"Rules":[{"Id":"DeleteAfter7Days","Status":"Enabled","Expiration":{"Days":7}}]}' \
+                                            --region ${params.REGION}
+                                    """
+                                }
+                            }
+                        }
+                        
+                        stage('Create Batch Job Role') {
+                            def trustPolicy = '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"batchoperations.s3.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+                            
+                            retry(3) {
+                                def roleExists = sh(
+                                    script: "aws iam get-role --role-name ${env.BATCH_JOB_ROLE_NAME} 2>&1",
+                                    returnStatus: true
+                                )
+                                
+                                if (roleExists != 0) {
+                                    sh """
+                                        aws iam create-role \
+                                            --role-name ${env.BATCH_JOB_ROLE_NAME} \
+                                            --assume-role-policy-document '${trustPolicy}'
+                                    """
+                                    
+                                    sleep(time: 10, unit: 'SECONDS')
+                                }
+                            }
+                            
+                            def executionPolicy = """
+                            {
+                                "Version": "2012-10-17",
+                                "Statement": [
+                                    {
+                                        "Effect": "Allow",
+                                        "Action": [
+                                            "s3:GetObject",
+                                            "s3:GetObjectVersion",
+                                            "s3:GetObjectTagging",
+                                            "s3:GetObjectVersionTagging",
+                                            "s3:ListBucket"
+                                        ],
+                                        "Resource": [
+                                            "arn:aws:s3:::${env.SOURCE_BUCKET}",
+                                            "arn:aws:s3:::${env.SOURCE_BUCKET}/*"
+                                        ]
+                                    },
+                                    {
+                                        "Effect": "Allow",
+                                        "Action": [
+                                            "s3:PutObject",
+                                            "s3:PutObjectTagging",
+                                            "s3:GetObject",
+                                            "s3:GetObjectVersion",
+                                            "s3:ListBucket"
+                                        ],
+                                        "Resource": [
+                                            "arn:aws:s3:::${env.DEST_BUCKET}",
+                                            "arn:aws:s3:::${env.DEST_BUCKET}/*"
+                                        ]
+                                    },
+                                    {
+                                        "Effect": "Allow",
+                                        "Action": [
+                                            "s3:GetObject",
+                                            "s3:GetObjectVersion",
+                                            "s3:ListBucket"
+                                        ],
+                                        "Resource": [
+                                            "arn:aws:s3:::${env.MANIFEST_BUCKET}",
+                                            "arn:aws:s3:::${env.MANIFEST_BUCKET}/*"
+                                        ]
+                                    },
+                                    {
+                                        "Effect": "Allow",
+                                        "Action": [
+                                            "s3:PutObject",
+                                            "s3:ListBucket"
+                                        ],
+                                        "Resource": [
+                                            "arn:aws:s3:::${env.REPORT_BUCKET}",
+                                            "arn:aws:s3:::${env.REPORT_BUCKET}/*",
+                                            "arn:aws:s3:::${env.MANIFEST_BUCKET}/*"
+                                        ]
+                                    },
+                                    {
+                                        "Effect": "Allow",
+                                        "Action": [
+                                            "s3:PutInventoryConfiguration"
+                                        ],
+                                        "Resource": "arn:aws:s3:::${env.DEST_BUCKET}"
+                                    }
+                                ]
+                            }
+                            """
+                            
+                            writeFile file: '/tmp/batch-job-execution-policy.json', text: executionPolicy
+                            
+                            retry(3) {
+                                sh """
+                                    aws iam put-role-policy \
+                                        --role-name ${env.BATCH_JOB_ROLE_NAME} \
+                                        --policy-name BatchJobExecutionPolicy \
+                                        --policy-document file:///tmp/batch-job-execution-policy.json
+                                """
+                            }
+                        }
+                        
+                        stage('Create S3 Batch Job') {
+                            def role3Arn = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${env.BATCH_JOB_ROLE_NAME}"
+                            def filterJson = params.SOURCE_PREFIX ? 
+                                """{"KeyNameConstraint":{"MatchAnyPrefix":["${params.SOURCE_PREFIX}"]}}""" : 
+                                '{}'
+                            def destPath = params.DEST_PREFIX ? "${params.DEST_PREFIX}/" : ""
+                            
+                            def operationJson = """{"S3CopyObject":{"TargetResource":"arn:aws:s3:::${env.DEST_BUCKET}/${destPath}","CannedAccessControlList":"private","MetadataDirective":"COPY","TaggingDirective":"COPY"}}"""
+                            def manifestGeneratorJson = """{"S3JobManifestGenerator":{"ExpectedBucketOwner":"${env.ACCOUNT_NUMBER}","SourceBucket":"arn:aws:s3:::${env.SOURCE_BUCKET}","EnableManifestOutput":true,"ManifestOutputLocation":{"ExpectedManifestBucketOwner":"${env.ACCOUNT_NUMBER}","Bucket":"arn:aws:s3:::${env.MANIFEST_BUCKET}","ManifestPrefix":"manifests/","ManifestFormat":"S3InventoryReport_CSV_20211130"},"Filter":${filterJson}}}"""
+                            def reportJson = """{"Bucket":"arn:aws:s3:::${env.REPORT_BUCKET}","Prefix":"reports/","Format":"Report_CSV_20180820","Enabled":true,"ReportScope":"AllTasks"}"""
+                            
+                            writeFile file: '/tmp/operation.json', text: operationJson
+                            writeFile file: '/tmp/report.json', text: reportJson
+                            writeFile file: '/tmp/manifest-generator.json', text: manifestGeneratorJson
+                            
+                            def jobOutput = ''
+                            retry(3) {
+                                jobOutput = sh(
+                                    script: """
+                                        aws s3control create-job \
+                                            --account-id ${env.ACCOUNT_NUMBER} \
+                                            --operation file:///tmp/operation.json \
+                                            --report file:///tmp/report.json \
+                                            --manifest-generator file:///tmp/manifest-generator.json \
+                                            --priority ${params.PRIORITY} \
+                                            --role-arn ${role3Arn} \
+                                            --region ${params.REGION} \
+                                            --output json
+                                    """,
+                                    returnStdout: true
+                                ).trim()
+                            }
+                            
+                            def jobId = sh(
+                                script: "echo '${jobOutput}' | jq -r '.JobId'",
                                 returnStdout: true
                             ).trim()
                             
-                            def buckets = sh(
-                                script: "echo '${bucketsJson}' | jq -r '.Buckets[].Name'",
-                                returnStdout: true
-                            ).trim().split('\n')
-                            
-                            for (bucket in buckets) {
-                                try {
-                                    def tagsJson = sh(
-                                        script: "aws s3api get-bucket-tagging --bucket ${bucket} --region ${params.REGION} --output json 2>&1",
-                                        returnStdout: true
-                                    ).trim()
-                                    
-                                    if (tagsJson && !tagsJson.contains('NoSuchTagSet')) {
-                                        def operationValue = sh(
-                                            script: "echo '${tagsJson}' | jq -r '.TagSet[] | select(.Key==\"operation\") | .Value'",
-                                            returnStdout: true
-                                        ).trim()
-                                        
-                                        def envValue = sh(
-                                            script: "echo '${tagsJson}' | jq -r '.TagSet[] | select(.Key==\"env\") | .Value'",
-                                            returnStdout: true
-                                        ).trim()
-                                        
-                                        def targetValue = sh(
-                                            script: "echo '${tagsJson}' | jq -r '.TagSet[] | select(.Key==\"Target\") | .Value'",
-                                            returnStdout: true
-                                        ).trim()
-                                        
-                                        if (operationValue == env.OPERATION_TAG && envValue == params.ENV_TAG) {
-                                            if (targetValue == 'Source') {
-                                                sourceBucket = bucket
-                                            } else if (targetValue == 'Destination') {
-                                                destBucket = bucket
-                                            }
-                                        }
-                                    }
-                                } catch (Exception e) {
-                                    continue
-                                }
+                            if (!jobId || jobId == 'null') {
+                                error("Failed to create batch job. Response: ${jobOutput}")
                             }
-                        }
-                    }
-                    
-                    if (!sourceBucket) {
-                        error("Source bucket not found. Ensure a bucket exists with tags: operation=${env.OPERATION_TAG}, env=${params.ENV_TAG}, Target=Source")
-                    }
-                    if (!destBucket) {
-                        error("Destination bucket not found. Ensure a bucket exists with tags: operation=${env.OPERATION_TAG}, env=${params.ENV_TAG}, Target=Destination")
-                    }
-                    
-                    env.SOURCE_BUCKET = sourceBucket
-                    env.DEST_BUCKET = destBucket
-                }
-            }
-        }
-        
-        stage('Create Report Bucket') {
-            steps {
-                script {
-                    def awsEnv = assumeRoleAndSetEnv(env.S3_BATCH_INFRA_ROLE_ARN, 'jenkins-s3-batch-copy', params.REGION)
-                    withEnv(awsEnv) {
-                        retry(3) {
-                            def bucketExists = sh(
-                                script: "aws s3api head-bucket --bucket ${env.REPORT_BUCKET} --region ${params.REGION} 2>&1",
-                                returnStatus: true
-                            )
                             
-                            if (bucketExists != 0) {
-                                def createCmd = params.REGION == 'us-east-1' ? 
-                                    "aws s3api create-bucket --bucket ${env.REPORT_BUCKET} --region ${params.REGION}" :
-                                    "aws s3api create-bucket --bucket ${env.REPORT_BUCKET} --region ${params.REGION} --create-bucket-configuration LocationConstraint=${params.REGION}"
-                                
-                                sh """
-                                    ${createCmd}
-                                    aws s3api put-bucket-lifecycle-configuration \
-                                        --bucket ${env.REPORT_BUCKET} \
-                                        --lifecycle-configuration '{"Rules":[{"Id":"DeleteAfter7Days","Status":"Enabled","Expiration":{"Days":7}}]}' \
-                                        --region ${params.REGION}
-                                """
-                            }
+                            env.S3_BATCH_JOB_ID = jobId
+                            echo "S3 Batch Job created successfully. Job ID: ${jobId}"
                         }
-                    }
-                }
-            }
-        }
-        
-        stage('Create Manifest Bucket') {
-            steps {
-                script {
-                    def awsEnv = assumeRoleAndSetEnv(env.S3_BATCH_INFRA_ROLE_ARN, 'jenkins-s3-batch-copy', params.REGION)
-                    withEnv(awsEnv) {
-                        retry(3) {
-                            def bucketExists = sh(
-                                script: "aws s3api head-bucket --bucket ${env.MANIFEST_BUCKET} --region ${params.REGION} 2>&1",
-                                returnStatus: true
-                            )
-                            
-                            if (bucketExists != 0) {
-                                def createCmd = params.REGION == 'us-east-1' ? 
-                                    "aws s3api create-bucket --bucket ${env.MANIFEST_BUCKET} --region ${params.REGION}" :
-                                    "aws s3api create-bucket --bucket ${env.MANIFEST_BUCKET} --region ${params.REGION} --create-bucket-configuration LocationConstraint=${params.REGION}"
-                                
-                                sh """
-                                    ${createCmd}
-                                    aws s3api put-bucket-lifecycle-configuration \
-                                        --bucket ${env.MANIFEST_BUCKET} \
-                                        --lifecycle-configuration '{"Rules":[{"Id":"DeleteAfter7Days","Status":"Enabled","Expiration":{"Days":7}}]}' \
-                                        --region ${params.REGION}
-                                """
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        stage('Create Batch Job Role') {
-            steps {
-                script {
-                    def awsEnv = assumeRoleAndSetEnv(env.S3_BATCH_INFRA_ROLE_ARN, 'jenkins-s3-batch-copy', params.REGION)
-                    withEnv(awsEnv) {
-                        def trustPolicy = '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"batchoperations.s3.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
-                        
-                        retry(3) {
-                            def roleExists = sh(
-                                script: "aws iam get-role --role-name ${env.BATCH_JOB_ROLE_NAME} 2>&1",
-                                returnStatus: true
-                            )
-                            
-                            if (roleExists != 0) {
-                                sh """
-                                    aws iam create-role \
-                                        --role-name ${env.BATCH_JOB_ROLE_NAME} \
-                                        --assume-role-policy-document '${trustPolicy}'
-                                """
-                                
-                                sleep(time: 10, unit: 'SECONDS')
-                            }
-                        }
-                        
-                        def executionPolicy = """
-                        {
-                            "Version": "2012-10-17",
-                            "Statement": [
-                                {
-                                    "Effect": "Allow",
-                                    "Action": [
-                                        "s3:GetObject",
-                                        "s3:GetObjectVersion",
-                                        "s3:GetObjectTagging",
-                                        "s3:GetObjectVersionTagging",
-                                        "s3:ListBucket"
-                                    ],
-                                    "Resource": [
-                                        "arn:aws:s3:::${env.SOURCE_BUCKET}",
-                                        "arn:aws:s3:::${env.SOURCE_BUCKET}/*"
-                                    ]
-                                },
-                                {
-                                    "Effect": "Allow",
-                                    "Action": [
-                                        "s3:PutObject",
-                                        "s3:PutObjectTagging",
-                                        "s3:GetObject",
-                                        "s3:GetObjectVersion",
-                                        "s3:ListBucket"
-                                    ],
-                                    "Resource": [
-                                        "arn:aws:s3:::${env.DEST_BUCKET}",
-                                        "arn:aws:s3:::${env.DEST_BUCKET}/*"
-                                    ]
-                                },
-                                {
-                                    "Effect": "Allow",
-                                    "Action": [
-                                        "s3:GetObject",
-                                        "s3:GetObjectVersion",
-                                        "s3:ListBucket"
-                                    ],
-                                    "Resource": [
-                                        "arn:aws:s3:::${env.MANIFEST_BUCKET}",
-                                        "arn:aws:s3:::${env.MANIFEST_BUCKET}/*"
-                                    ]
-                                },
-                                {
-                                    "Effect": "Allow",
-                                    "Action": [
-                                        "s3:PutObject",
-                                        "s3:ListBucket"
-                                    ],
-                                    "Resource": [
-                                        "arn:aws:s3:::${env.REPORT_BUCKET}",
-                                        "arn:aws:s3:::${env.REPORT_BUCKET}/*",
-                                        "arn:aws:s3:::${env.MANIFEST_BUCKET}/*"
-                                    ]
-                                },
-                                {
-                                    "Effect": "Allow",
-                                    "Action": [
-                                        "s3:PutInventoryConfiguration"
-                                    ],
-                                    "Resource": "arn:aws:s3:::${env.DEST_BUCKET}"
-                                }
-                            ]
-                        }
-                        """
-                        
-                        writeFile file: '/tmp/batch-job-execution-policy.json', text: executionPolicy
-                        
-                        retry(3) {
-                            sh """
-                                aws iam put-role-policy \
-                                    --role-name ${env.BATCH_JOB_ROLE_NAME} \
-                                    --policy-name BatchJobExecutionPolicy \
-                                    --policy-document file:///tmp/batch-job-execution-policy.json
-                            """
-                        }
-                    }
-                }
-            }
-        }
-        
-        stage('Create S3 Batch Job') {
-            steps {
-                script {
-                    def awsEnv = assumeRoleAndSetEnv(env.S3_BATCH_INFRA_ROLE_ARN, 'jenkins-s3-batch-copy', params.REGION)
-                    withEnv(awsEnv) {
-                        def role3Arn = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${env.BATCH_JOB_ROLE_NAME}"
-                        def filterJson = params.SOURCE_PREFIX ? 
-                            """{"KeyNameConstraint":{"MatchAnyPrefix":["${params.SOURCE_PREFIX}"]}}""" : 
-                            '{}'
-                        def destPath = params.DEST_PREFIX ? "${params.DEST_PREFIX}/" : ""
-                        
-                        def operationJson = """{"S3CopyObject":{"TargetResource":"arn:aws:s3:::${env.DEST_BUCKET}/${destPath}","CannedAccessControlList":"private","MetadataDirective":"COPY","TaggingDirective":"COPY"}}"""
-                                    def manifestGeneratorJson = """{"S3JobManifestGenerator":{"ExpectedBucketOwner":"${env.ACCOUNT_NUMBER}","SourceBucket":"arn:aws:s3:::${env.SOURCE_BUCKET}","EnableManifestOutput":true,"ManifestOutputLocation":{"ExpectedManifestBucketOwner":"${env.ACCOUNT_NUMBER}","Bucket":"arn:aws:s3:::${env.MANIFEST_BUCKET}","ManifestPrefix":"manifests/","ManifestFormat":"S3InventoryReport_CSV_20211130"},"Filter":${filterJson}}}"""
-                        def reportJson = """{"Bucket":"arn:aws:s3:::${env.REPORT_BUCKET}","Prefix":"reports/","Format":"Report_CSV_20180820","Enabled":true,"ReportScope":"AllTasks"}"""
-                        
-                        writeFile file: '/tmp/operation.json', text: operationJson
-                        writeFile file: '/tmp/report.json', text: reportJson
-                        writeFile file: '/tmp/manifest-generator.json', text: manifestGeneratorJson
-                        
-                        def jobOutput = ''
-                        retry(3) {
-                                    jobOutput = sh(
-                                        script: """
-                                            aws s3control create-job \
-                                                --account-id ${env.ACCOUNT_NUMBER} \
-                                                --operation file:///tmp/operation.json \
-                                                --report file:///tmp/report.json \
-                                                --manifest-generator file:///tmp/manifest-generator.json \
-                                                --priority ${params.PRIORITY} \
-                                                --role-arn ${role3Arn} \
-                                                --region ${params.REGION} \
-                                                --output json
-                                        """,
-                                        returnStdout: true
-                                    ).trim()
-                        }
-                        
-                        def jobId = sh(
-                            script: "echo '${jobOutput}' | jq -r '.JobId'",
-                            returnStdout: true
-                        ).trim()
-                        
-                        if (!jobId || jobId == 'null') {
-                            error("Failed to create batch job. Response: ${jobOutput}")
-                        }
-                        
-                        env.S3_BATCH_JOB_ID = jobId
-                        echo "S3 Batch Job created successfully. Job ID: ${jobId}"
                     }
                 }
             }
