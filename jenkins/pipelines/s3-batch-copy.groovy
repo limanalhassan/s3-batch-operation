@@ -417,7 +417,6 @@ pipeline {
                             writeFile file: 'operation.json', text: groovy.json.JsonOutput.prettyPrint(operationJson)
                             writeFile file: 'manifest-generator.json', text: groovy.json.JsonOutput.prettyPrint(manifestGeneratorJson)
                             writeFile file: 'report.json', text: groovy.json.JsonOutput.prettyPrint(reportJson)
-                            writeFile file: 'manifest.json', text: '{}'
                             
                             // Show the JSON for debugging
                             echo "=== Operation JSON ==="
@@ -442,7 +441,6 @@ pipeline {
                                             --account-id ${env.ACCOUNT_NUMBER} \
                                             --operation file://${workspacePath}/operation.json \
                                             --manifest-generator file://${workspacePath}/manifest-generator.json \
-                                            --manifest file://${workspacePath}/manifest.json \
                                             --report file://${workspacePath}/report.json \
                                             --priority ${params.PRIORITY} \
                                             --role-arn ${role3Arn} \
