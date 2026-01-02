@@ -1,3 +1,10 @@
+def getAccountNumber(accountName) {
+    def accountMap = [
+        'liman': '272117124614'
+    ]
+    return accountMap[accountName] ?: null
+}
+
 pipeline {
     agent any
     
@@ -7,8 +14,7 @@ pipeline {
     }
     
     parameters {
-        string(name: 'ACCOUNT_NUMBER', defaultValue: '', description: 'AWS Account Number')
-        string(name: 'ACCOUNT_NAME', defaultValue: '', description: 'Account Name')
+        string(name: 'ACCOUNT_NAME', defaultValue: '', description: 'Account Name (e.g., liman)')
         string(name: 'S3_BATCH_INFRA_ROLE_NAME', defaultValue: '', description: 'Name of Role 2 (S3 Batch Infrastructure Role)')
         string(name: 'ENV_TAG', defaultValue: '', description: 'Environment tag value to filter buckets (e.g., dev, staging, prod)')
         string(name: 'SOURCE_PREFIX', defaultValue: '', description: 'Bucket prefix to copy from')
@@ -19,7 +25,8 @@ pipeline {
     
     environment {
         OPERATION_TAG = 's3BatchOperations'
-        S3_BATCH_INFRA_ROLE_ARN = "arn:aws:iam::${params.ACCOUNT_NUMBER}:role/${params.S3_BATCH_INFRA_ROLE_NAME}"
+        ACCOUNT_NUMBER = "${getAccountNumber(params.ACCOUNT_NAME)}"
+        S3_BATCH_INFRA_ROLE_ARN = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${params.S3_BATCH_INFRA_ROLE_NAME}"
         REPORT_BUCKET = "${params.ACCOUNT_NAME}-report-${params.ACCOUNT_NAME}"
         MANIFEST_BUCKET = "${params.ACCOUNT_NAME}-manifest-${params.ACCOUNT_NAME}"
         BATCH_JOB_ROLE_NAME = "${params.ACCOUNT_NAME}-batch-job-role"
@@ -30,9 +37,16 @@ pipeline {
         stage('Validate Parameters') {
             steps {
                 script {
-                    if (!params.ACCOUNT_NUMBER || !params.ACCOUNT_NAME || !params.S3_BATCH_INFRA_ROLE_NAME || !params.ENV_TAG) {
-                        error('ACCOUNT_NUMBER, ACCOUNT_NAME, S3_BATCH_INFRA_ROLE_NAME, and ENV_TAG are required parameters')
+                    if (!params.ACCOUNT_NAME || !params.S3_BATCH_INFRA_ROLE_NAME || !params.ENV_TAG) {
+                        error('ACCOUNT_NAME, S3_BATCH_INFRA_ROLE_NAME, and ENV_TAG are required parameters')
                     }
+                    
+                    if (!env.ACCOUNT_NUMBER || env.ACCOUNT_NUMBER == 'null') {
+                        error("Account number not found for account name: ${params.ACCOUNT_NAME}. Please add it to the account mapping.")
+                    }
+                    
+                    echo "Account Name: ${params.ACCOUNT_NAME}"
+                    echo "Account Number: ${env.ACCOUNT_NUMBER}"
                 }
             }
         }
@@ -271,14 +285,14 @@ pipeline {
             steps {
                 script {
                     withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
-                        def role3Arn = "arn:aws:iam::${params.ACCOUNT_NUMBER}:role/${env.BATCH_JOB_ROLE_NAME}"
+                        def role3Arn = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${env.BATCH_JOB_ROLE_NAME}"
                         def filterJson = params.SOURCE_PREFIX ? 
                             """{"KeyNameConstraint":{"MatchAnyPrefix":["${params.SOURCE_PREFIX}"]}}""" : 
                             '{}'
                         def destPath = params.DEST_PREFIX ? "${params.DEST_PREFIX}/" : ""
                         
                         def operationJson = """{"S3CopyObject":{"TargetResource":"arn:aws:s3:::${env.DEST_BUCKET}/${destPath}","CannedAccessControlList":"private","MetadataDirective":"COPY","TaggingDirective":"COPY"}}"""
-                        def manifestGeneratorJson = """{"S3JobManifestGenerator":{"ExpectedBucketOwner":"${params.ACCOUNT_NUMBER}","SourceBucket":"arn:aws:s3:::${env.SOURCE_BUCKET}","EnableManifestOutput":true,"ManifestOutputLocation":{"ExpectedManifestBucketOwner":"${params.ACCOUNT_NUMBER}","Bucket":"arn:aws:s3:::${env.MANIFEST_BUCKET}","ManifestPrefix":"manifests/","ManifestFormat":"S3InventoryReport_CSV_20211130"},"Filter":${filterJson}}}"""
+                                    def manifestGeneratorJson = """{"S3JobManifestGenerator":{"ExpectedBucketOwner":"${env.ACCOUNT_NUMBER}","SourceBucket":"arn:aws:s3:::${env.SOURCE_BUCKET}","EnableManifestOutput":true,"ManifestOutputLocation":{"ExpectedManifestBucketOwner":"${env.ACCOUNT_NUMBER}","Bucket":"arn:aws:s3:::${env.MANIFEST_BUCKET}","ManifestPrefix":"manifests/","ManifestFormat":"S3InventoryReport_CSV_20211130"},"Filter":${filterJson}}}"""
                         def reportJson = """{"Bucket":"arn:aws:s3:::${env.REPORT_BUCKET}","Prefix":"reports/","Format":"Report_CSV_20180820","Enabled":true,"ReportScope":"AllTasks"}"""
                         
                         writeFile file: '/tmp/operation.json', text: operationJson
@@ -287,20 +301,20 @@ pipeline {
                         
                         def jobOutput = ''
                         retry(3) {
-                            jobOutput = sh(
-                                script: """
-                                    aws s3control create-job \
-                                        --account-id ${params.ACCOUNT_NUMBER} \
-                                        --operation file:///tmp/operation.json \
-                                        --report file:///tmp/report.json \
-                                        --manifest-generator file:///tmp/manifest-generator.json \
-                                        --priority ${params.PRIORITY} \
-                                        --role-arn ${role3Arn} \
-                                        --region ${params.REGION} \
-                                        --output json
-                                """,
-                                returnStdout: true
-                            ).trim()
+                                    jobOutput = sh(
+                                        script: """
+                                            aws s3control create-job \
+                                                --account-id ${env.ACCOUNT_NUMBER} \
+                                                --operation file:///tmp/operation.json \
+                                                --report file:///tmp/report.json \
+                                                --manifest-generator file:///tmp/manifest-generator.json \
+                                                --priority ${params.PRIORITY} \
+                                                --role-arn ${role3Arn} \
+                                                --region ${params.REGION} \
+                                                --output json
+                                        """,
+                                        returnStdout: true
+                                    ).trim()
                         }
                         
                         def jobId = sh(
@@ -325,7 +339,7 @@ pipeline {
             script {
                 if (env.S3_BATCH_JOB_ID) {
                     echo "Job ID: ${env.S3_BATCH_JOB_ID}"
-                    echo "Monitor: aws s3control describe-job --account-id ${params.ACCOUNT_NUMBER} --job-id ${env.S3_BATCH_JOB_ID} --region ${params.REGION}"
+                    echo "Monitor: aws s3control describe-job --account-id ${env.ACCOUNT_NUMBER} --job-id ${env.S3_BATCH_JOB_ID} --region ${params.REGION}"
                 }
             }
         }
