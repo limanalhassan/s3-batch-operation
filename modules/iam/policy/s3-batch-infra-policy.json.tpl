@@ -18,7 +18,13 @@
     {
       "Effect": "Allow",
       "Action": [
-        "s3:CreateBucket",
+        "s3:CreateBucket"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
         "s3:PutBucketPolicy",
         "s3:PutBucketVersioning",
         "s3:PutBucketEncryption",
@@ -27,10 +33,7 @@
         "s3:GetBucketLocation",
         "s3:GetBucketVersioning"
       ],
-      "Resource": [
-        "arn:aws:s3:::${name_prefix}-report-*",
-        "arn:aws:s3:::${name_prefix}-manifest-*"
-      ]
+      "Resource": "*"
     },
     {
       "Effect": "Allow",

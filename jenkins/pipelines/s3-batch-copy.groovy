@@ -28,9 +28,10 @@ pipeline {
         OPERATION_TAG = 's3BatchOperations'
         ACCOUNT_NUMBER = "${getAccountNumber(params.ACCOUNT_NAME)}"
         S3_BATCH_INFRA_ROLE_ARN = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${params.S3_BATCH_INFRA_ROLE_NAME}"
-        REPORT_BUCKET = "${params.ACCOUNT_NAME}-report-${params.ACCOUNT_NAME}"
-        MANIFEST_BUCKET = "${params.ACCOUNT_NAME}-manifest-${params.ACCOUNT_NAME}"
-        BATCH_JOB_ROLE_NAME = "${params.ACCOUNT_NAME}-batch-job-role"
+        NAME_PREFIX = "s3-batch-operations-${params.ACCOUNT_NAME}-${params.ENV_TAG}"
+        REPORT_BUCKET = "${env.NAME_PREFIX}-report-${params.ENV_TAG}"
+        MANIFEST_BUCKET = "${env.NAME_PREFIX}-manifest-${params.ENV_TAG}"
+        BATCH_JOB_ROLE_NAME = "${env.NAME_PREFIX}-batch-job-role"
     }
     
     
