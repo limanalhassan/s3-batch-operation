@@ -24,9 +24,17 @@ pipelineJob('S3-Batch-Operations/Dev/S3-Batch-Copy') {
     }
     
     definition {
-        cps {
-            script(readFileFromWorkspace('jenkins/pipelines/s3-batch-copy.groovy'))
-            sandbox(true)
+        cpsScm {
+            scm {
+                git {
+                    remote {
+                        url('https://github.com/limanalhassan/s3-batch-operation.git')
+                        credentials('s3_batch_operation_jenkins')
+                    }
+                    branch('master')
+                }
+            }
+            scriptPath('jenkins/pipelines/s3-batch-copy.groovy')
         }
     }
 }
