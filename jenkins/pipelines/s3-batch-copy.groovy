@@ -531,7 +531,26 @@ pipeline {
                                 """
                                 
                                 echo "Executing command..."
-                                // Run command and capture output
+                                // Run command and capture both output and exit code
+                                def result = sh(
+                                    script: """
+                                        ${awsCmd} s3control create-job \\
+                                            --account-id ${env.ACCOUNT_NUMBER} \\
+                                            --operation file://${workspacePath}/operation.json \\
+                                            --manifest-generator file://${workspacePath}/manifest-generator.json \\
+                                            --report file://${workspacePath}/report.json \\
+                                            --priority ${params.PRIORITY} \\
+                                            --role-arn ${role3Arn} \\
+                                            --region ${params.REGION} \\
+                                            --no-confirmation-required \\
+                                            --output json 2>&1
+                                    """,
+                                    returnStdout: true,
+                                    returnStatus: true
+                                )
+                                
+                                // result is an Integer (exit code) when returnStatus is true
+                                // We need to capture output separately
                                 jobOutput = sh(
                                     script: """
                                         ${awsCmd} s3control create-job \\
@@ -548,40 +567,7 @@ pipeline {
                                     returnStdout: true
                                 ).trim()
                                 
-                                // Check exit code separately
-                                def exitCode = sh(
-                                    script: """
-                                        ${awsCmd} s3control create-job \\
-                                            --account-id ${env.ACCOUNT_NUMBER} \\
-                                            --operation file://${workspacePath}/operation.json \\
-                                            --manifest-generator file://${workspacePath}/manifest-generator.json \\
-                                            --report file://${workspacePath}/report.json \\
-                                            --priority ${params.PRIORITY} \\
-                                            --role-arn ${role3Arn} \\
-                                            --region ${params.REGION} \\
-                                            --no-confirmation-required \\
-                                            --output json > /dev/null 2>&1; echo \$?
-                                    """,
-                                    returnStdout: true
-                                ).trim().toInteger()
-                                
-                                // If error, run with --debug to get more details
-                                if (exitCode != 0) {
-                                    echo "=== Running with --debug to capture request details ==="
-                                    sh """
-                                        ${awsCmd} s3control create-job \\
-                                            --account-id ${env.ACCOUNT_NUMBER} \\
-                                            --operation file://${workspacePath}/operation.json \\
-                                            --manifest-generator file://${workspacePath}/manifest-generator.json \\
-                                            --report file://${workspacePath}/report.json \\
-                                            --priority ${params.PRIORITY} \\
-                                            --role-arn ${role3Arn} \\
-                                            --region ${params.REGION} \\
-                                            --no-confirmation-required \\
-                                            --output json \\
-                                            --debug 2>&1 | grep -E "(Request body|InvalidRequest|Request invalid|error|Error)" | head -100 || true
-                                    """
-                                }
+                                def exitCode = result  // result is the exit code Integer
                                 
                                 echo "=== COMMAND OUTPUT ==="
                                 echo "${jobOutput}"
@@ -603,6 +589,30 @@ pipeline {
                                             echo "Error Type: ${errorMatch[0][1]}"
                                             echo "Error Message: ${errorMatch[0][2]}"
                                         }
+                                    }
+                                    
+                                    // Run with --debug to get request details
+                                    echo "=== Running with --debug to capture request details ==="
+                                    def debugOutput = sh(
+                                        script: """
+                                            ${awsCmd} s3control create-job \\
+                                                --account-id ${env.ACCOUNT_NUMBER} \\
+                                                --operation file://${workspacePath}/operation.json \\
+                                                --manifest-generator file://${workspacePath}/manifest-generator.json \\
+                                                --report file://${workspacePath}/report.json \\
+                                                --priority ${params.PRIORITY} \\
+                                                --role-arn ${role3Arn} \\
+                                                --region ${params.REGION} \\
+                                                --no-confirmation-required \\
+                                                --output json \\
+                                                --debug 2>&1 | grep -A 100 -E "(Request body|body:|InvalidRequest|Request invalid)" | head -200 || true
+                                        """,
+                                        returnStdout: true
+                                    ).trim()
+                                    
+                                    if (debugOutput) {
+                                        echo "=== DEBUG OUTPUT (filtered) ==="
+                                        echo "${debugOutput}"
                                     }
                                     
                                     error("AWS CLI command failed with exit code ${exitCode}. Output: ${jobOutput}")
