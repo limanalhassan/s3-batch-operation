@@ -1,6 +1,6 @@
 def getAccountNumber(accountName) {
     def accountMap = [
-        'liman': '272117124614'
+        'aws': '272117124614',
     ]
     return accountMap[accountName] ?: null
 }
@@ -15,7 +15,7 @@ pipeline {
     }
     
     parameters {
-        string(name: 'ACCOUNT_NAME', defaultValue: '', description: 'Account Name (e.g., liman)')
+        string(name: 'ACCOUNT_NAME', defaultValue: '', description: 'Account Name (e.g., aws)')
         string(name: 'ENV_TAG', defaultValue: '', description: 'Environment tag value to filter buckets (e.g., dev, staging, prod)')
         string(name: 'SOURCE_PREFIX', defaultValue: '', description: 'Bucket prefix to copy from')
         string(name: 'DEST_PREFIX', defaultValue: '', description: 'Bucket prefix to copy to')
