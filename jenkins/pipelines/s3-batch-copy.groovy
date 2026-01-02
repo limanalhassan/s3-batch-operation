@@ -415,7 +415,8 @@ pipeline {
                             
                             // Build JSON using Groovy maps for proper formatting
                             // Note: TargetResource must be bucket ARN only (no path/prefix)
-                            // For DEST_PREFIX, we'll need to handle it via object key transformation if needed
+                            // S3PutObjectCopy copies objects with their original keys
+                            // To copy to a prefix, we would need to use S3ReplicateObject or handle key transformation
                             def operationMap = [
                                 S3PutObjectCopy: [
                                     TargetResource: "arn:aws:s3:::${env.DEST_BUCKET}",
@@ -424,9 +425,11 @@ pipeline {
                                 ]
                             ]
                             
-                            // Add TargetKeyPrefix if DEST_PREFIX is provided
+                            // Note: DEST_PREFIX is not directly supported by S3PutObjectCopy
+                            // Objects will be copied with their original keys to the destination bucket
+                            // If prefix transformation is needed, consider using S3ReplicateObject or Lambda
                             if (params.DEST_PREFIX) {
-                                operationMap.S3PutObjectCopy.TargetKeyPrefix = params.DEST_PREFIX
+                                echo "WARNING: DEST_PREFIX (${params.DEST_PREFIX}) is provided but S3PutObjectCopy does not support prefix transformation. Objects will be copied with original keys."
                             }
                             
                             def manifestGeneratorMap = [
