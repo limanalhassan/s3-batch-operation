@@ -369,7 +369,7 @@ pipeline {
                             
                             // Build JSON using Groovy maps for proper formatting
                             def operationMap = [
-                                S3CopyObject: [
+                                S3PutObjectCopy: [
                                     TargetResource: "arn:aws:s3:::${env.DEST_BUCKET}/${destPath}",
                                     CannedAccessControlList: "private",
                                     MetadataDirective: "COPY",
