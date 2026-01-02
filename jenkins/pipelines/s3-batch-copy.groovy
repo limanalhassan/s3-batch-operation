@@ -468,9 +468,10 @@ pipeline {
                             def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
                             
                             // Write individual JSON files (AWS CLI v2 prefers this approach)
+                            // Note: --manifest-generator expects the S3JobManifestGenerator object directly, not wrapped
                             def operationJson = groovy.json.JsonOutput.toJson(operationMap)
                             def reportJson = groovy.json.JsonOutput.toJson(reportMap)
-                            def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap)
+                            def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap.S3JobManifestGenerator)  // Unwrap S3JobManifestGenerator
                             
                             writeFile file: 'operation.json', text: operationJson
                             writeFile file: 'report.json', text: reportJson
