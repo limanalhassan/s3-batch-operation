@@ -486,36 +486,66 @@ pipeline {
                             sh "cat manifest-generator.json | jq ."
                             
                             // Use AWS CLI v2 with individual file parameters (most reliable approach)
+                            // First, let's validate the source bucket has objects
+                            echo "Validating source bucket has objects..."
+                            def objectCount = sh(
+                                script: """
+                                    ${awsCmd} s3api list-objects-v2 \
+                                        --bucket ${env.SOURCE_BUCKET} \
+                                        --max-items 1 \
+                                        --region ${params.REGION} \
+                                        --output json 2>&1 | jq -r '.KeyCount // 0'
+                                """,
+                                returnStdout: true
+                            ).trim()
+                            echo "Source bucket object count (first page): ${objectCount}"
+                            
                             def jobOutput = ''
                             retry(3) {
                                 try {
-                                    // Capture output (stdout + stderr redirected)
+                                    // Try to get more detailed error information
+                                    // Use --debug to see what's being sent (but this might be too verbose)
+                                    // Instead, let's try the command and capture full output
+                                    def cmd = """
+                                        ${awsCmd} s3control create-job \
+                                            --account-id ${env.ACCOUNT_NUMBER} \
+                                            --operation file://${workspacePath}/operation.json \
+                                            --manifest-generator file://${workspacePath}/manifest-generator.json \
+                                            --report file://${workspacePath}/report.json \
+                                            --priority ${params.PRIORITY} \
+                                            --role-arn ${role3Arn} \
+                                            --region ${params.REGION} \
+                                            --no-confirmation-required \
+                                            --output json 2>&1
+                                    """
+                                    
+                                    echo "Executing command..."
                                     jobOutput = sh(
-                                        script: """
-                                            ${awsCmd} s3control create-job \
-                                                --account-id ${env.ACCOUNT_NUMBER} \
-                                                --operation file://${workspacePath}/operation.json \
-                                                --manifest-generator file://${workspacePath}/manifest-generator.json \
-                                                --report file://${workspacePath}/report.json \
-                                                --priority ${params.PRIORITY} \
-                                                --role-arn ${role3Arn} \
-                                                --region ${params.REGION} \
-                                                --no-confirmation-required \
-                                                --output json 2>&1
-                                        """,
+                                        script: cmd,
                                         returnStdout: true
                                     ).trim()
                                     
+                                    echo "Command output: ${jobOutput}"
+                                    
                                     // Check if output contains error message
-                                    if (jobOutput.contains('An error occurred')) {
-                                        echo "AWS CLI Error: ${jobOutput}"
+                                    if (jobOutput.contains('An error occurred') || jobOutput.contains('InvalidRequest') || jobOutput.contains('Request invalid')) {
+                                        echo "=== ERROR DETECTED ==="
+                                        echo "Full output: ${jobOutput}"
+                                        
+                                        // Try to get more details by checking each JSON file individually
+                                        echo "=== Validating JSON files ==="
+                                        sh "jq . ${workspacePath}/operation.json"
+                                        sh "jq . ${workspacePath}/manifest-generator.json"
+                                        sh "jq . ${workspacePath}/report.json"
+                                        
                                         error("AWS CLI returned error: ${jobOutput}")
                                     }
                                     
-                                    // If we got here, the command succeeded (Jenkins would have thrown on non-zero exit)
+                                    // If we got here, the command succeeded
                                     // Verify we got valid JSON with JobId
                                     if (!jobOutput.contains('JobId')) {
                                         echo "Warning: Response doesn't contain JobId. Output: ${jobOutput}"
+                                        error("Unexpected response format: ${jobOutput}")
                                     }
                                 } catch (Exception e) {
                                     echo "Exception during job creation: ${e.getMessage()}"
