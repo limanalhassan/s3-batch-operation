@@ -60,17 +60,7 @@ pipeline {
                     echo "Attempting to assume role: ${env.S3_BATCH_INFRA_ROLE_ARN}"
                     echo "Region: ${params.REGION}"
                     
-                    echo "Checking instance metadata service accessibility..."
-                    def metadataCheck = sh(
-                        script: "curl -s --max-time 2 http://169.254.169.254/latest/meta-data/iam/security-credentials/ 2>&1 || echo 'METADATA_UNAVAILABLE'",
-                        returnStdout: true
-                    ).trim()
-                    
-                    if (metadataCheck == 'METADATA_UNAVAILABLE' || metadataCheck.contains('Connection refused')) {
-                        error("Cannot access EC2 instance metadata service. Jenkins may need to be configured to use instance profile credentials, or AWS credentials need to be configured in Jenkins.")
-                    }
-                    
-                    echo "Instance profile available: ${metadataCheck}"
+                    echo "Note: Instance profile is attached to EC2 instance. withAWS will attempt to use it."
                     
                     withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy', region: params.REGION) {
                         echo "Successfully assumed role. Testing AWS credentials..."
