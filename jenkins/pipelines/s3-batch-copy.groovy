@@ -372,30 +372,36 @@ pipeline {
                             // Check if AWS CLI v2 is installed (v2 has 'aws-cli/2' in version string)
                             def isCliV2 = awsCliVersion.contains('aws-cli/2')
                             if (!isCliV2) {
-                                echo "AWS CLI v1 detected. Upgrading to AWS CLI v2..."
+                                echo "AWS CLI v1 detected. Installing AWS CLI v2 to user directory..."
                                 
-                                // Install AWS CLI v2
+                                // Install AWS CLI v2 to user's home directory (no sudo required)
+                                def homeDir = sh(script: 'echo $HOME', returnStdout: true).trim()
+                                def awsCliV2Path = "${homeDir}/.local/aws-cli"
+                                
                                 sh """
                                     cd /tmp
                                     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" || exit 1
                                     unzip -q awscliv2.zip || exit 1
-                                    sudo ./aws/install || exit 1
+                                    ./aws/install -i ${awsCliV2Path} -b ${homeDir}/.local/bin || exit 1
                                     rm -f awscliv2.zip
                                     rm -rf aws
                                 """
                                 
+                                // Update PATH for this session to use AWS CLI v2
+                                env.PATH = "${homeDir}/.local/bin:${env.PATH}"
+                                
                                 // Verify installation
                                 def newVersion = sh(
-                                    script: "aws --version 2>&1",
+                                    script: "${homeDir}/.local/bin/aws --version 2>&1",
                                     returnStdout: true
                                 ).trim()
                                 echo "New AWS CLI Version: ${newVersion}"
                                 
                                 if (!newVersion.contains('aws-cli/2')) {
-                                    error("Failed to upgrade to AWS CLI v2. Current version: ${newVersion}")
+                                    error("Failed to install AWS CLI v2. Current version: ${newVersion}")
                                 }
                                 
-                                echo "Successfully upgraded to AWS CLI v2"
+                                echo "Successfully installed AWS CLI v2 to ${homeDir}/.local/bin"
                             } else {
                                 echo "AWS CLI v2 is already installed"
                             }
@@ -469,11 +475,14 @@ pipeline {
                             sh "cat manifest-generator.json | jq ."
                             
                             // Use AWS CLI v2 with --manifest-generator (requires AWS CLI v2.0.0+)
+                            // Use full path to ensure we're using v2 if it was just installed
+                            def awsCmd = isCliV2 ? 'aws' : "${sh(script: 'echo $HOME', returnStdout: true).trim()}/.local/bin/aws"
+                            
                             def jobOutput = ''
                             retry(3) {
                                 jobOutput = sh(
                                     script: """
-                                        aws s3control create-job \
+                                        ${awsCmd} s3control create-job \
                                             --account-id ${env.ACCOUNT_NUMBER} \
                                             --operation file://${workspacePath}/operation.json \
                                             --manifest-generator file://${workspacePath}/manifest-generator.json \
