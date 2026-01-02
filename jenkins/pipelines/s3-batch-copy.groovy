@@ -465,7 +465,8 @@ pipeline {
                             // Write JSON files for individual parameters
                             def operationJson = groovy.json.JsonOutput.toJson(operationMap)
                             def reportJson = groovy.json.JsonOutput.toJson(reportMap)
-                            def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap.S3JobManifestGenerator)
+                            // AWS CLI expects the full structure with S3JobManifestGenerator as top-level key
+                            def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap)
                             
                             writeFile file: 'operation.json', text: operationJson
                             writeFile file: 'report.json', text: reportJson
