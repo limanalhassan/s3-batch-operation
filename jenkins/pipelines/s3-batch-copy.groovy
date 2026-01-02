@@ -442,6 +442,27 @@ pipeline {
                                 python3 -m json.tool report.json > /dev/null && echo "Report JSON is valid" || (echo "Invalid JSON!" && exit 1)
                             """
                             
+                            // Install boto3 if not already installed
+                            echo "Checking for boto3..."
+                            def boto3Installed = sh(
+                                script: "python3 -c 'import boto3' 2>&1",
+                                returnStatus: true
+                            )
+                            
+                            if (boto3Installed != 0) {
+                                echo "boto3 not found. Installing..."
+                                sh """
+                                    python3 -m pip install --user boto3 || pip3 install --user boto3 || (echo "Failed to install boto3" && exit 1)
+                                """
+                                // Verify installation
+                                sh """
+                                    python3 -c "import boto3; print('boto3 installed successfully, version:', boto3.__version__)" || (echo "Failed to import boto3 after installation" && exit 1)
+                                """
+                            } else {
+                                echo "boto3 is already installed"
+                                sh "python3 -c 'import boto3; print(\"boto3 version:\", boto3.__version__)'"
+                            }
+                            
                             // Use Python with boto3 to create the job (more reliable than AWS CLI)
                             // This avoids AWS CLI version compatibility issues with --manifest-generator
                             def pythonScript = """
