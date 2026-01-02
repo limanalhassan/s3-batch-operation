@@ -18,7 +18,6 @@ pipelineJob('S3-Batch-Operations/Dev/S3-Batch-Copy') {
         stringParam('ACCOUNT_NUMBER', '', 'AWS Account Number')
         stringParam('ACCOUNT_NAME', '', 'Account Name')
         stringParam('S3_BATCH_INFRA_ROLE_ARN', '', 'ARN of Role 2 (S3 Batch Infrastructure Role)')
-        stringParam('OPERATION_TAG', 's3BatchOperations', 'Operation tag value to filter buckets')
         stringParam('ENV_TAG', '', 'Environment tag value to filter buckets (e.g., dev, staging, prod)')
         stringParam('SOURCE_PREFIX', '', 'Bucket prefix to copy from')
         stringParam('DEST_PREFIX', '', 'Bucket prefix to copy to')

@@ -10,7 +10,6 @@ pipeline {
         string(name: 'ACCOUNT_NUMBER', defaultValue: '', description: 'AWS Account Number')
         string(name: 'ACCOUNT_NAME', defaultValue: '', description: 'Account Name')
         string(name: 'S3_BATCH_INFRA_ROLE_ARN', defaultValue: '', description: 'ARN of Role 2 (S3 Batch Infrastructure Role)')
-        string(name: 'OPERATION_TAG', defaultValue: 's3BatchOperations', description: 'Operation tag value to filter buckets')
         string(name: 'ENV_TAG', defaultValue: '', description: 'Environment tag value to filter buckets (e.g., dev, staging, prod)')
         string(name: 'SOURCE_PREFIX', defaultValue: '', description: 'Bucket prefix to copy from')
         string(name: 'DEST_PREFIX', defaultValue: '', description: 'Bucket prefix to copy to')
@@ -19,10 +18,12 @@ pipeline {
     }
     
     environment {
+        OPERATION_TAG = 's3BatchOperations'
         REPORT_BUCKET = "${params.ACCOUNT_NAME}-report-${params.ACCOUNT_NAME}"
         MANIFEST_BUCKET = "${params.ACCOUNT_NAME}-manifest-${params.ACCOUNT_NAME}"
         BATCH_JOB_ROLE_NAME = "${params.ACCOUNT_NAME}-batch-job-role"
     }
+    
     
     stages {
         stage('Validate Parameters') {
@@ -75,7 +76,7 @@ pipeline {
                                         returnStdout: true
                                     ).trim()
                                     
-                                    if (operationValue == params.OPERATION_TAG && envValue == params.ENV_TAG) {
+                                    if (operationValue == env.OPERATION_TAG && envValue == params.ENV_TAG) {
                                         if (targetValue == 'Source') {
                                             sourceBucket = bucket
                                         } else if (targetValue == 'Destination') {
@@ -90,10 +91,10 @@ pipeline {
                     }
                     
                     if (!sourceBucket) {
-                        error("Source bucket not found. Ensure a bucket exists with tags: operation=${params.OPERATION_TAG}, env=${params.ENV_TAG}, Target=Source")
+                        error("Source bucket not found. Ensure a bucket exists with tags: operation=${env.OPERATION_TAG}, env=${params.ENV_TAG}, Target=Source")
                     }
                     if (!destBucket) {
-                        error("Destination bucket not found. Ensure a bucket exists with tags: operation=${params.OPERATION_TAG}, env=${params.ENV_TAG}, Target=Destination")
+                        error("Destination bucket not found. Ensure a bucket exists with tags: operation=${env.OPERATION_TAG}, env=${params.ENV_TAG}, Target=Destination")
                     }
                     
                     env.SOURCE_BUCKET = sourceBucket
