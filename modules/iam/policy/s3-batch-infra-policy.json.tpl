@@ -51,12 +51,7 @@
         "iam:AttachRolePolicy",
         "iam:TagRole"
       ],
-      "Resource": "arn:aws:iam::*:role/${name_prefix}-batch-job-role*",
-      "Condition": {
-        "StringEquals": {
-          "iam:AWSServiceName": "batchoperations.s3.amazonaws.com"
-        }
-      }
+      "Resource": "arn:aws:iam::*:role/${name_prefix}-batch-job-role*"
     },
     {
       "Effect": "Allow",
