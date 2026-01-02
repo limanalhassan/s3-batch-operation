@@ -408,41 +408,39 @@ pipeline {
                                 ReportScope: "AllTasks"
                             ]
                             
-                            // Convert to JSON and write to files (more reliable than passing as strings)
+                            // Build complete CLI input JSON
+                            // Note: When using ManifestGenerator, do not include Manifest field
+                            def cliInputMap = [
+                                AccountId: env.ACCOUNT_NUMBER,
+                                Operation: operationMap,
+                                ManifestGenerator: manifestGeneratorMap,
+                                Report: reportMap,
+                                Priority: params.PRIORITY.toInteger(),
+                                RoleArn: role3Arn,
+                                ConfirmationRequired: false
+                            ]
+                            
+                            // Convert to JSON and write to file
                             def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
-                            
-                            def operationJson = groovy.json.JsonOutput.toJson(operationMap)
-                            def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap)
-                            def reportJson = groovy.json.JsonOutput.toJson(reportMap)
-                            
-                            // Write JSON to files
-                            writeFile file: 'operation.json', text: operationJson
-                            writeFile file: 'manifest-generator.json', text: manifestGeneratorJson
-                            writeFile file: 'report.json', text: reportJson
-                            writeFile file: 'manifest.json', text: '{}'
+                            def cliInputJson = groovy.json.JsonOutput.toJson(cliInputMap)
+                            writeFile file: 'create-job-input.json', text: groovy.json.JsonOutput.prettyPrint(cliInputJson)
                             
                             // Show the JSON for debugging
-                            echo "=== Operation JSON ==="
-                            sh "cat operation.json"
-                            echo "=== Manifest Generator JSON ==="
-                            sh "cat manifest-generator.json"
-                            echo "=== Report JSON ==="
-                            sh "cat report.json"
+                            echo "=== CLI Input JSON ==="
+                            sh "cat create-job-input.json"
+                            
+                            // Validate JSON
+                            sh """
+                                python3 -m json.tool create-job-input.json > /dev/null && echo "JSON is valid" || (echo "Invalid JSON!" && exit 1)
+                            """
                             
                             def jobOutput = ''
                             retry(3) {
                                 jobOutput = sh(
                                     script: """
                                         aws s3control create-job \
-                                            --account-id ${env.ACCOUNT_NUMBER} \
-                                            --operation file://${workspacePath}/operation.json \
-                                            --manifest-generator file://${workspacePath}/manifest-generator.json \
-                                            --manifest file://${workspacePath}/manifest.json \
-                                            --report file://${workspacePath}/report.json \
-                                            --priority ${params.PRIORITY} \
-                                            --role-arn ${role3Arn} \
+                                            --cli-input-json file://${workspacePath}/create-job-input.json \
                                             --region ${params.REGION} \
-                                            --no-confirmation-required \
                                             --output json
                                     """,
                                     returnStdout: true
