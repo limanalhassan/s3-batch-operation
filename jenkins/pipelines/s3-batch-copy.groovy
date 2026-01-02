@@ -57,7 +57,15 @@ pipeline {
                     def sourceBucket = null
                     def destBucket = null
                     
-                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
+                    echo "Attempting to assume role: ${env.S3_BATCH_INFRA_ROLE_ARN}"
+                    echo "Region: ${params.REGION}"
+                    
+                    echo "Testing instance profile credentials first..."
+                    sh "aws sts get-caller-identity || echo 'Instance profile not available'"
+                    
+                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy', region: params.REGION) {
+                        echo "Successfully assumed role. Testing AWS credentials..."
+                        sh "aws sts get-caller-identity"
                         retry(3) {
                             def bucketsJson = sh(
                                 script: "aws s3api list-buckets --output json --region ${params.REGION}",
@@ -123,7 +131,7 @@ pipeline {
         stage('Create Report Bucket') {
             steps {
                 script {
-                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
+                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy', region: params.REGION) {
                         retry(3) {
                             def bucketExists = sh(
                                 script: "aws s3api head-bucket --bucket ${env.REPORT_BUCKET} --region ${params.REGION} 2>&1",
@@ -152,7 +160,7 @@ pipeline {
         stage('Create Manifest Bucket') {
             steps {
                 script {
-                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
+                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy', region: params.REGION) {
                         retry(3) {
                             def bucketExists = sh(
                                 script: "aws s3api head-bucket --bucket ${env.MANIFEST_BUCKET} --region ${params.REGION} 2>&1",
@@ -181,7 +189,7 @@ pipeline {
         stage('Create Batch Job Role') {
             steps {
                 script {
-                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
+                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy', region: params.REGION) {
                         def trustPolicy = '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"batchoperations.s3.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
                         
                         retry(3) {
@@ -286,7 +294,7 @@ pipeline {
         stage('Create S3 Batch Job') {
             steps {
                 script {
-                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
+                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy', region: params.REGION) {
                         def role3Arn = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${env.BATCH_JOB_ROLE_NAME}"
                         def filterJson = params.SOURCE_PREFIX ? 
                             """{"KeyNameConstraint":{"MatchAnyPrefix":["${params.SOURCE_PREFIX}"]}}""" : 
