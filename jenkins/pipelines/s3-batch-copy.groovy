@@ -1,10 +1,13 @@
 def getAccountNumber(accountName) {
     def accountMap = [
         'aws': '272117124614',
-        'liman': '272117124614'  // Keep for existing infrastructure
+        'liman': '272117124614'
     ]
     return accountMap[accountName] ?: null
 }
+
+// Resource prefix matches Terraform project_name - update if infrastructure changes
+def RESOURCE_PREFIX = 's3-batch-operations-liman'
 
 
 pipeline {
@@ -17,7 +20,6 @@ pipeline {
     
     parameters {
         string(name: 'ACCOUNT_NAME', defaultValue: '', description: 'Account Name (e.g., aws) - Used only for account number mapping')
-        string(name: 'RESOURCE_PREFIX', defaultValue: 's3-batch-operations-liman', description: 'Resource prefix for AWS resources (roles, buckets) - Must match Terraform project_name')
         string(name: 'ENV_TAG', defaultValue: '', description: 'Environment tag value to filter buckets (e.g., dev, staging, prod)')
         string(name: 'SOURCE_PREFIX', defaultValue: '', description: 'Bucket prefix to copy from')
         string(name: 'DEST_PREFIX', defaultValue: '', description: 'Bucket prefix to copy to')
@@ -28,7 +30,7 @@ pipeline {
     environment {
         OPERATION_TAG = 's3BatchOperations'
         ACCOUNT_NUMBER = "${getAccountNumber(params.ACCOUNT_NAME)}"
-        NAME_PREFIX = "${params.RESOURCE_PREFIX}-${params.ENV_TAG}"
+        NAME_PREFIX = "${RESOURCE_PREFIX}-${params.ENV_TAG}"
         S3_BATCH_INFRA_ROLE_NAME = "${env.NAME_PREFIX}-s3-batch-infra-role"
         S3_BATCH_INFRA_ROLE_ARN = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${env.S3_BATCH_INFRA_ROLE_NAME}"
         REPORT_BUCKET = "${env.NAME_PREFIX}-report-${params.ENV_TAG}"
@@ -41,8 +43,8 @@ pipeline {
         stage('Validate Parameters') {
             steps {
                 script {
-                    if (!params.ACCOUNT_NAME || !params.RESOURCE_PREFIX || !params.ENV_TAG) {
-                        error('ACCOUNT_NAME, RESOURCE_PREFIX, and ENV_TAG are required parameters')
+                    if (!params.ACCOUNT_NAME || !params.ENV_TAG) {
+                        error('ACCOUNT_NAME and ENV_TAG are required parameters')
                     }
                     
                     if (!env.ACCOUNT_NUMBER || env.ACCOUNT_NUMBER == 'null') {
@@ -51,7 +53,7 @@ pipeline {
                     
                     echo "Account Name: ${params.ACCOUNT_NAME}"
                     echo "Account Number: ${env.ACCOUNT_NUMBER}"
-                    echo "Resource Prefix: ${params.RESOURCE_PREFIX}"
+                    echo "Resource Prefix: ${RESOURCE_PREFIX}"
                     echo "Name Prefix: ${env.NAME_PREFIX}"
                     echo "Role Name: ${env.S3_BATCH_INFRA_ROLE_NAME}"
                     echo "Attempting to assume role: ${env.S3_BATCH_INFRA_ROLE_ARN}"
