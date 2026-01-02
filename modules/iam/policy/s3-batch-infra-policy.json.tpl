@@ -40,10 +40,16 @@
       "Effect": "Allow",
       "Action": [
         "iam:CreateRole",
+        "iam:GetRole"
+      ],
+      "Resource": "arn:aws:iam::*:role/${name_prefix}-batch-job-role*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
         "iam:PutRolePolicy",
         "iam:AttachRolePolicy",
-        "iam:TagRole",
-        "iam:GetRole"
+        "iam:TagRole"
       ],
       "Resource": "arn:aws:iam::*:role/${name_prefix}-batch-job-role*",
       "Condition": {
