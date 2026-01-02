@@ -530,23 +530,8 @@ pipeline {
                                         --output json 2>&1
                                 """
                                 
-                                echo "Executing command with debug output..."
-                                // First try with --debug to see what's being sent (capture to file to avoid overwhelming logs)
-                                sh """
-                                    ${awsCmd} s3control create-job \
-                                        --account-id ${env.ACCOUNT_NUMBER} \
-                                        --operation file://${workspacePath}/operation.json \
-                                        --manifest-generator file://${workspacePath}/manifest-generator.json \
-                                        --report file://${workspacePath}/report.json \
-                                        --priority ${params.PRIORITY} \
-                                        --role-arn ${role3Arn} \
-                                        --region ${params.REGION} \
-                                        --no-confirmation-required \
-                                        --output json \
-                                        --debug 2>&1 | tee ${workspacePath}/aws-debug.log || true
-                                """
-                                
-                                // Extract just the error message from debug output
+                                echo "Executing command..."
+                                // Run command and capture output
                                 jobOutput = sh(
                                     script: """
                                         ${awsCmd} s3control create-job \
@@ -563,7 +548,7 @@ pipeline {
                                     returnStdout: true
                                 ).trim()
                                 
-                                // Check exit code
+                                // Check exit code separately
                                 def exitCode = sh(
                                     script: """
                                         ${awsCmd} s3control create-job \
@@ -575,21 +560,26 @@ pipeline {
                                             --role-arn ${role3Arn} \
                                             --region ${params.REGION} \
                                             --no-confirmation-required \
-                                            --output json 2>&1 > /dev/null; echo $?
+                                            --output json > /dev/null 2>&1; echo $?
                                     """,
                                     returnStdout: true
                                 ).trim().toInteger()
                                 
-                                // Show relevant parts of debug log if error occurred
+                                // If error, run with --debug to get more details
                                 if (exitCode != 0) {
-                                    echo "=== Checking debug log for request details ==="
+                                    echo "=== Running with --debug to capture request details ==="
                                     sh """
-                                        if [ -f ${workspacePath}/aws-debug.log ]; then
-                                            echo "=== Request Body from debug log ==="
-                                            grep -A 50 "Request body:" ${workspacePath}/aws-debug.log | head -100 || true
-                                            echo "=== Error details from debug log ==="
-                                            grep -A 20 "InvalidRequest\|Request invalid\|error" ${workspacePath}/aws-debug.log | head -50 || true
-                                        fi
+                                        ${awsCmd} s3control create-job \
+                                            --account-id ${env.ACCOUNT_NUMBER} \
+                                            --operation file://${workspacePath}/operation.json \
+                                            --manifest-generator file://${workspacePath}/manifest-generator.json \
+                                            --report file://${workspacePath}/report.json \
+                                            --priority ${params.PRIORITY} \
+                                            --role-arn ${role3Arn} \
+                                            --region ${params.REGION} \
+                                            --no-confirmation-required \
+                                            --output json \
+                                            --debug 2>&1 | grep -E "(Request body|InvalidRequest|Request invalid|error|Error)" | head -100 || true
                                     """
                                 }
                                 
