@@ -369,6 +369,27 @@ pipeline {
                             ).trim()
                             echo "AWS CLI Version: ${awsCliVersion}"
                             
+                            // Check if AWS CLI v2 is installed (v2 has 'aws-cli/2' in version string)
+                            def isCliV2 = awsCliVersion.contains('aws-cli/2')
+                            if (!isCliV2) {
+                                error("""
+                                    ERROR: AWS CLI v1 does not support ManifestGenerator feature.
+                                    
+                                    Current version: ${awsCliVersion}
+                                    
+                                    To use ManifestGenerator, you MUST upgrade to AWS CLI v2.
+                                    
+                                    Installation steps for AWS CLI v2 on Amazon Linux 2:
+                                    1. curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                                    2. unzip awscliv2.zip
+                                    3. sudo ./aws/install
+                                    4. Verify: aws --version (should show aws-cli/2.x.x)
+                                    
+                                    Alternatively, you can use a pre-existing manifest file instead of ManifestGenerator,
+                                    but that requires creating the manifest file manually first.
+                                """)
+                            }
+                            
                             def role3Arn = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${env.BATCH_JOB_ROLE_NAME}"
                             def filterJson = params.SOURCE_PREFIX ? 
                                 """{"KeyNameConstraint":{"MatchAnyPrefix":["${params.SOURCE_PREFIX}"]}}""" : 
@@ -416,38 +437,41 @@ pipeline {
                                 ReportScope: "AllTasks"
                             ]
                             
-                            // Build complete CLI input JSON for AWS CLI
+                            // AWS CLI v1 doesn't support ManifestGenerator - need to use individual parameters
+                            // Note: ManifestGenerator requires AWS CLI v2, but we'll try with --manifest '{}' as workaround
                             def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
-                            def cliInputJson = [
-                                AccountId: env.ACCOUNT_NUMBER,
-                                Operation: operationMap,
-                                ManifestGenerator: manifestGeneratorMap.S3JobManifestGenerator,
-                                Report: reportMap,
-                                Priority: params.PRIORITY.toInteger(),
-                                RoleArn: role3Arn,
-                                ConfirmationRequired: false
-                            ]
                             
-                            // Convert to JSON and write to file
-                            def cliInputJsonString = groovy.json.JsonOutput.toJson(cliInputJson)
-                            writeFile file: 'cli-input.json', text: groovy.json.JsonOutput.prettyPrint(cliInputJsonString)
+                            // Write JSON files for individual parameters
+                            def operationJson = groovy.json.JsonOutput.toJson(operationMap)
+                            def reportJson = groovy.json.JsonOutput.toJson(reportMap)
+                            def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap.S3JobManifestGenerator)
                             
-                            // Validate JSON
-                            sh """
-                                echo "=== CLI Input JSON ==="
-                                cat cli-input.json | jq .
-                                echo "=== Validating JSON ==="
-                                jq . cli-input.json > /dev/null && echo "JSON is valid" || (echo "Invalid JSON!" && exit 1)
-                            """
+                            writeFile file: 'operation.json', text: operationJson
+                            writeFile file: 'report.json', text: reportJson
+                            writeFile file: 'manifest-generator.json', text: manifestGeneratorJson
                             
-                            // Use AWS CLI with --cli-input-json (works with AWS CLI v1)
+                            // Show JSON for debugging
+                            echo "=== Operation JSON ==="
+                            sh "cat operation.json | jq ."
+                            echo "=== Report JSON ==="
+                            sh "cat report.json | jq ."
+                            echo "=== Manifest Generator JSON ==="
+                            sh "cat manifest-generator.json | jq ."
+                            
+                            // Use AWS CLI v2 with --manifest-generator (requires AWS CLI v2.0.0+)
                             def jobOutput = ''
                             retry(3) {
                                 jobOutput = sh(
                                     script: """
                                         aws s3control create-job \
-                                            --cli-input-json file://${workspacePath}/cli-input.json \
+                                            --account-id ${env.ACCOUNT_NUMBER} \
+                                            --operation file://${workspacePath}/operation.json \
+                                            --manifest-generator file://${workspacePath}/manifest-generator.json \
+                                            --report file://${workspacePath}/report.json \
+                                            --priority ${params.PRIORITY} \
+                                            --role-arn ${role3Arn} \
                                             --region ${params.REGION} \
+                                            --no-confirmation-required \
                                             --output json
                                     """,
                                     returnStdout: true
