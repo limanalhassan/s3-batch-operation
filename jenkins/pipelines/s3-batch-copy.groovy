@@ -371,11 +371,13 @@ pipeline {
                             
                             // Check if AWS CLI v2 is installed (v2 has 'aws-cli/2' in version string)
                             def isCliV2 = awsCliVersion.contains('aws-cli/2')
+                            def homeDir = sh(script: 'echo $HOME', returnStdout: true).trim()
+                            def awsCmd = 'aws'  // Default to system aws
+                            
                             if (!isCliV2) {
                                 echo "AWS CLI v1 detected. Installing AWS CLI v2 to user directory..."
                                 
                                 // Install AWS CLI v2 to user's home directory (no sudo required)
-                                def homeDir = sh(script: 'echo $HOME', returnStdout: true).trim()
                                 def awsCliV2Path = "${homeDir}/.local/aws-cli"
                                 
                                 sh """
@@ -401,6 +403,8 @@ pipeline {
                                     error("Failed to install AWS CLI v2. Current version: ${newVersion}")
                                 }
                                 
+                                // Use the newly installed AWS CLI v2
+                                awsCmd = "${homeDir}/.local/bin/aws"
                                 echo "Successfully installed AWS CLI v2 to ${homeDir}/.local/bin"
                             } else {
                                 echo "AWS CLI v2 is already installed"
@@ -475,9 +479,6 @@ pipeline {
                             sh "cat manifest-generator.json | jq ."
                             
                             // Use AWS CLI v2 with --manifest-generator (requires AWS CLI v2.0.0+)
-                            // Use full path to ensure we're using v2 if it was just installed
-                            def awsCmd = isCliV2 ? 'aws' : "${sh(script: 'echo $HOME', returnStdout: true).trim()}/.local/bin/aws"
-                            
                             def jobOutput = ''
                             retry(3) {
                                 jobOutput = sh(
