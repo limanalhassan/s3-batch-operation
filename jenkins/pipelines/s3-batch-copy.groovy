@@ -385,7 +385,7 @@ pipeline {
                                     rm -rf aws awscliv2.zip
                                     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" || exit 1
                                     unzip -o -q awscliv2.zip || exit 1
-                                    ./aws/install -i ${awsCliV2Path} -b ${homeDir}/.local/bin || exit 1
+                                    ./aws/install -i ${awsCliV2Path} -b ${homeDir}/.local/bin --update || exit 1
                                     rm -f awscliv2.zip
                                     rm -rf aws
                                 """
