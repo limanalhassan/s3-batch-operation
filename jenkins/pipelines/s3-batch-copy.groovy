@@ -371,9 +371,22 @@ pipeline {
                             def manifestGeneratorJson = """{"S3JobManifestGenerator":{"ExpectedBucketOwner":"${env.ACCOUNT_NUMBER}","SourceBucket":"arn:aws:s3:::${env.SOURCE_BUCKET}","EnableManifestOutput":true,"ManifestOutputLocation":{"ExpectedManifestBucketOwner":"${env.ACCOUNT_NUMBER}","Bucket":"arn:aws:s3:::${env.MANIFEST_BUCKET}","ManifestPrefix":"manifests/","ManifestFormat":"S3InventoryReport_CSV_20211130"},"Filter":${filterJson}}}"""
                             def reportJson = """{"Bucket":"arn:aws:s3:::${env.REPORT_BUCKET}","Prefix":"reports/","Format":"Report_CSV_20180820","Enabled":true,"ReportScope":"AllTasks"}"""
                             
-                            writeFile file: '/tmp/operation.json', text: operationJson
-                            writeFile file: '/tmp/report.json', text: reportJson
-                            writeFile file: '/tmp/manifest-generator.json', text: manifestGeneratorJson
+                            def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
+                            writeFile file: 'operation.json', text: operationJson
+                            writeFile file: 'report.json', text: reportJson
+                            writeFile file: 'manifest-generator.json', text: manifestGeneratorJson
+                            
+                            // Show the JSON files for debugging
+                            sh """
+                                echo "=== Operation JSON ==="
+                                cat operation.json
+                                echo ""
+                                echo "=== Manifest Generator JSON ==="
+                                cat manifest-generator.json
+                                echo ""
+                                echo "=== Report JSON ==="
+                                cat report.json
+                            """
                             
                             def jobOutput = ''
                             retry(3) {
@@ -381,12 +394,13 @@ pipeline {
                                     script: """
                                         aws s3control create-job \
                                             --account-id ${env.ACCOUNT_NUMBER} \
-                                            --operation file:///tmp/operation.json \
-                                            --report file:///tmp/report.json \
-                                            --manifest-generator file:///tmp/manifest-generator.json \
+                                            --operation file://${workspacePath}/operation.json \
+                                            --manifest file://${workspacePath}/manifest-generator.json \
+                                            --report file://${workspacePath}/report.json \
                                             --priority ${params.PRIORITY} \
                                             --role-arn ${role3Arn} \
                                             --region ${params.REGION} \
+                                            --no-confirmation-required \
                                             --output json
                                     """,
                                     returnStdout: true
