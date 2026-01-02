@@ -429,6 +429,7 @@ pipeline {
                                             --account-id ${env.ACCOUNT_NUMBER} \
                                             --operation '${operationJson}' \
                                             --manifest-generator '${manifestGeneratorJson}' \
+                                            --manifest '{}' \
                                             --report '${reportJson}' \
                                             --priority ${params.PRIORITY} \
                                             --role-arn ${role3Arn} \
