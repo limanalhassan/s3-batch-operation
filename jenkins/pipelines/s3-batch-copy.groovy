@@ -489,8 +489,8 @@ pipeline {
                             def jobOutput = ''
                             retry(3) {
                                 try {
-                                    // Capture both stdout and stderr
-                                    def result = sh(
+                                    // Capture stdout and stderr, check exit code separately
+                                    def exitCode = sh(
                                         script: """
                                             ${awsCmd} s3control create-job \
                                                 --account-id ${env.ACCOUNT_NUMBER} \
@@ -507,11 +507,29 @@ pipeline {
                                         returnStatus: true
                                     )
                                     
-                                    jobOutput = result.output.trim()
+                                    // When returnStatus is true, result is [exitCode: int, output: string]
+                                    // But Jenkins sandbox may not allow accessing .output directly
+                                    // So we need to capture output separately
+                                    jobOutput = sh(
+                                        script: """
+                                            ${awsCmd} s3control create-job \
+                                                --account-id ${env.ACCOUNT_NUMBER} \
+                                                --operation file://${workspacePath}/operation.json \
+                                                --manifest-generator file://${workspacePath}/manifest-generator.json \
+                                                --report file://${workspacePath}/report.json \
+                                                --priority ${params.PRIORITY} \
+                                                --role-arn ${role3Arn} \
+                                                --region ${params.REGION} \
+                                                --no-confirmation-required \
+                                                --output json 2>&1 || true
+                                        """,
+                                        returnStdout: true
+                                    ).trim()
                                     
-                                    if (result.exitValue != 0) {
-                                        echo "AWS CLI Error (exit code ${result.exitValue}): ${jobOutput}"
-                                        error("AWS CLI returned error: ${jobOutput}")
+                                    // Check exit code from first call
+                                    if (exitCode != 0) {
+                                        echo "AWS CLI Error (exit code ${exitCode}): ${jobOutput}"
+                                        error("AWS CLI returned error (exit code ${exitCode}): ${jobOutput}")
                                     }
                                     
                                     // Check if output contains error message
