@@ -269,74 +269,81 @@ pipeline {
                                 }
                             }
                             
-                            def executionPolicy = """{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:GetObjectVersion",
-        "s3:GetObjectTagging",
-        "s3:GetObjectVersionTagging",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::${env.SOURCE_BUCKET}",
-        "arn:aws:s3:::${env.SOURCE_BUCKET}/*"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:PutObject",
-        "s3:PutObjectTagging",
-        "s3:GetObject",
-        "s3:GetObjectVersion",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::${env.DEST_BUCKET}",
-        "arn:aws:s3:::${env.DEST_BUCKET}/*"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:GetObjectVersion",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::${env.MANIFEST_BUCKET}",
-        "arn:aws:s3:::${env.MANIFEST_BUCKET}/*"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:PutObject",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::${env.REPORT_BUCKET}",
-        "arn:aws:s3:::${env.REPORT_BUCKET}/*",
-        "arn:aws:s3:::${env.MANIFEST_BUCKET}/*"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:PutInventoryConfiguration"
-      ],
-      "Resource": "arn:aws:s3:::${env.DEST_BUCKET}"
-    }
-  ]
-}"""
+                            def executionPolicy = [
+                                Version: "2012-10-17",
+                                Statement: [
+                                    [
+                                        Effect: "Allow",
+                                        Action: [
+                                            "s3:GetObject",
+                                            "s3:GetObjectVersion",
+                                            "s3:GetObjectTagging",
+                                            "s3:GetObjectVersionTagging",
+                                            "s3:ListBucket"
+                                        ],
+                                        Resource: [
+                                            "arn:aws:s3:::${env.SOURCE_BUCKET}",
+                                            "arn:aws:s3:::${env.SOURCE_BUCKET}/*"
+                                        ]
+                                    ],
+                                    [
+                                        Effect: "Allow",
+                                        Action: [
+                                            "s3:PutObject",
+                                            "s3:PutObjectTagging",
+                                            "s3:GetObject",
+                                            "s3:GetObjectVersion",
+                                            "s3:ListBucket"
+                                        ],
+                                        Resource: [
+                                            "arn:aws:s3:::${env.DEST_BUCKET}",
+                                            "arn:aws:s3:::${env.DEST_BUCKET}/*"
+                                        ]
+                                    ],
+                                    [
+                                        Effect: "Allow",
+                                        Action: [
+                                            "s3:GetObject",
+                                            "s3:GetObjectVersion",
+                                            "s3:ListBucket"
+                                        ],
+                                        Resource: [
+                                            "arn:aws:s3:::${env.MANIFEST_BUCKET}",
+                                            "arn:aws:s3:::${env.MANIFEST_BUCKET}/*"
+                                        ]
+                                    ],
+                                    [
+                                        Effect: "Allow",
+                                        Action: [
+                                            "s3:PutObject",
+                                            "s3:ListBucket"
+                                        ],
+                                        Resource: [
+                                            "arn:aws:s3:::${env.REPORT_BUCKET}",
+                                            "arn:aws:s3:::${env.REPORT_BUCKET}/*",
+                                            "arn:aws:s3:::${env.MANIFEST_BUCKET}/*"
+                                        ]
+                                    ],
+                                    [
+                                        Effect: "Allow",
+                                        Action: [
+                                            "s3:PutInventoryConfiguration"
+                                        ],
+                                        Resource: "arn:aws:s3:::${env.DEST_BUCKET}"
+                                    ]
+                                ]
+                            ]
                             
-                            writeFile file: 'batch-job-execution-policy.json', text: executionPolicy.stripIndent()
+                            // Convert to JSON and write to file
                             def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
-                            sh "cat batch-job-execution-policy.json"
+                            def jsonPolicy = groovy.json.JsonOutput.toJson(executionPolicy)
+                            writeFile file: 'batch-job-execution-policy.json', text: groovy.json.JsonOutput.prettyPrint(jsonPolicy)
+                            
+                            // Validate and show JSON
+                            sh """
+                                cat batch-job-execution-policy.json
+                                python3 -m json.tool batch-job-execution-policy.json > /dev/null || (echo "Invalid JSON!" && exit 1)
+                            """
                             
                             retry(3) {
                                 sh """
