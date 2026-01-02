@@ -489,8 +489,8 @@ pipeline {
                             def jobOutput = ''
                             retry(3) {
                                 try {
-                                    // Capture stdout and stderr, check exit code separately
-                                    def exitCode = sh(
+                                    // Capture output (stdout + stderr redirected)
+                                    jobOutput = sh(
                                         script: """
                                             ${awsCmd} s3control create-job \
                                                 --account-id ${env.ACCOUNT_NUMBER} \
@@ -503,43 +503,25 @@ pipeline {
                                                 --no-confirmation-required \
                                                 --output json 2>&1
                                         """,
-                                        returnStdout: true,
-                                        returnStatus: true
-                                    )
-                                    
-                                    // When returnStatus is true, result is [exitCode: int, output: string]
-                                    // But Jenkins sandbox may not allow accessing .output directly
-                                    // So we need to capture output separately
-                                    jobOutput = sh(
-                                        script: """
-                                            ${awsCmd} s3control create-job \
-                                                --account-id ${env.ACCOUNT_NUMBER} \
-                                                --operation file://${workspacePath}/operation.json \
-                                                --manifest-generator file://${workspacePath}/manifest-generator.json \
-                                                --report file://${workspacePath}/report.json \
-                                                --priority ${params.PRIORITY} \
-                                                --role-arn ${role3Arn} \
-                                                --region ${params.REGION} \
-                                                --no-confirmation-required \
-                                                --output json 2>&1 || true
-                                        """,
                                         returnStdout: true
                                     ).trim()
-                                    
-                                    // Check exit code from first call
-                                    if (exitCode != 0) {
-                                        echo "AWS CLI Error (exit code ${exitCode}): ${jobOutput}"
-                                        error("AWS CLI returned error (exit code ${exitCode}): ${jobOutput}")
-                                    }
                                     
                                     // Check if output contains error message
                                     if (jobOutput.contains('An error occurred')) {
                                         echo "AWS CLI Error: ${jobOutput}"
                                         error("AWS CLI returned error: ${jobOutput}")
                                     }
+                                    
+                                    // If we got here, the command succeeded (Jenkins would have thrown on non-zero exit)
+                                    // Verify we got valid JSON with JobId
+                                    if (!jobOutput.contains('JobId')) {
+                                        echo "Warning: Response doesn't contain JobId. Output: ${jobOutput}"
+                                    }
                                 } catch (Exception e) {
                                     echo "Exception during job creation: ${e.getMessage()}"
-                                    echo "Full error output: ${jobOutput}"
+                                    if (jobOutput) {
+                                        echo "Command output: ${jobOutput}"
+                                    }
                                     throw e
                                 }
                             }
