@@ -439,7 +439,7 @@ pipeline {
                                     EnableManifestOutput: true,
                                     ManifestOutputLocation: [
                                         ExpectedManifestBucketOwner: "${env.ACCOUNT_NUMBER}",  // Must be string
-                                        Bucket: "arn:aws:s3:::${env.MANIFEST_BUCKET}",  // Bucket ARN format
+                                        Bucket: env.MANIFEST_BUCKET,  // Bucket name (not ARN) - matches SourceBucket format
                                         ManifestPrefix: "manifests/",
                                         ManifestFormat: "S3InventoryReport_CSV_20211130"
                                     ]
