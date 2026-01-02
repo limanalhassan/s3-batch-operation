@@ -60,13 +60,23 @@ pipeline {
                     echo "Attempting to assume role: ${env.S3_BATCH_INFRA_ROLE_ARN}"
                     echo "Region: ${params.REGION}"
                     
-                    echo "Testing instance profile credentials first..."
-                    sh "aws sts get-caller-identity || echo 'Instance profile not available'"
+                    echo "Checking instance metadata service accessibility..."
+                    def metadataCheck = sh(
+                        script: "curl -s --max-time 2 http://169.254.169.254/latest/meta-data/iam/security-credentials/ 2>&1 || echo 'METADATA_UNAVAILABLE'",
+                        returnStdout: true
+                    ).trim()
                     
-                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy', region: params.REGION) {
-                        echo "Successfully assumed role. Testing AWS credentials..."
-                        sh "aws sts get-caller-identity"
-                        retry(3) {
+                    if (metadataCheck == 'METADATA_UNAVAILABLE' || metadataCheck.contains('Connection refused')) {
+                        error("Cannot access EC2 instance metadata service. Jenkins may need to be configured to use instance profile credentials, or AWS credentials need to be configured in Jenkins.")
+                    }
+                    
+                    echo "Instance profile available: ${metadataCheck}"
+                    
+                    try {
+                        withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy', region: params.REGION) {
+                            echo "Successfully assumed role. Testing AWS credentials..."
+                            sh "aws sts get-caller-identity"
+                            retry(3) {
                             def bucketsJson = sh(
                                 script: "aws s3api list-buckets --output json --region ${params.REGION}",
                                 returnStdout: true
