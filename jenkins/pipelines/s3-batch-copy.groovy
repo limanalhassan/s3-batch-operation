@@ -436,6 +436,7 @@ pipeline {
                                 S3JobManifestGenerator: [
                                     ExpectedBucketOwner: "${env.ACCOUNT_NUMBER}",  // Must be string
                                     SourceBucket: env.SOURCE_BUCKET,  // Bucket name, not ARN
+                                    EnableManifestOutput: true,  // Required parameter - enables manifest output
                                     ManifestOutputLocation: [
                                         ExpectedManifestBucketOwner: "${env.ACCOUNT_NUMBER}",  // Must be string
                                         Bucket: env.MANIFEST_BUCKET,  // Bucket name (not ARN) - matches SourceBucket format
