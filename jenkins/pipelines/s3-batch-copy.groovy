@@ -56,6 +56,41 @@ pipeline {
         stage('AWS Operations') {
             steps {
                 script {
+                    // Test if instance profile is accessible via metadata service
+                    echo "Testing instance profile accessibility..."
+                    def metadataTest = sh(
+                        script: "curl -s --max-time 2 http://169.254.169.254/latest/meta-data/iam/security-credentials/ 2>&1 || echo 'METADATA_ERROR'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (metadataTest.contains('404') || metadataTest.contains('METADATA_ERROR') || metadataTest.contains('Not Found')) {
+                        echo "WARNING: Instance profile metadata service returned: ${metadataTest}"
+                        echo "Attempting to test AWS CLI access to instance profile..."
+                        
+                        def cliTest = sh(
+                            script: "aws sts get-caller-identity --region ${params.REGION} 2>&1 || echo 'CLI_ERROR'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (cliTest.contains('Unable to locate credentials') || cliTest.contains('CLI_ERROR')) {
+                            error("""
+                                Instance profile is not accessible. The EC2 instance needs to be rebooted for the instance profile to become accessible via the metadata service.
+                                
+                                The instance profile '${env.S3_BATCH_INFRA_ROLE_ARN.split('/')[1]}' is attached to the instance, but the metadata service cannot access it.
+                                
+                                To fix this:
+                                1. Reboot the EC2 instance (this will make the instance profile accessible)
+                                2. Jenkins will restart automatically after reboot
+                                3. Run this pipeline again
+                                
+                                Alternatively, if the instance profile was attached after instance creation, you may need to recreate the instance with Terraform to ensure the instance profile is attached at creation time.
+                            """)
+                        } else {
+                            echo "AWS CLI can access instance profile. Proceeding with withAWS..."
+                            echo "CLI Test Result: ${cliTest}"
+                        }
+                    }
+                    
                     withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy', region: params.REGION) {
                         echo "Successfully assumed role. Testing AWS credentials..."
                         sh "aws sts get-caller-identity"
