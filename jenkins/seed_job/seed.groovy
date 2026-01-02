@@ -15,7 +15,8 @@ pipelineJob('S3-Batch-Operations/Dev/S3-Batch-Copy') {
     description('Create S3 Batch Operations job to copy objects from source to destination bucket')
     
     parameters {
-        stringParam('ACCOUNT_NAME', '', 'Account Name (e.g., aws) - Account number will be auto-selected')
+        stringParam('ACCOUNT_NAME', '', 'Account Name (e.g., aws) - Used only for account number mapping')
+        stringParam('RESOURCE_PREFIX', 's3-batch-operations-liman', 'Resource prefix for AWS resources (roles, buckets) - Must match Terraform project_name')
         stringParam('ENV_TAG', '', 'Environment tag value to filter buckets (e.g., dev, staging, prod)')
         stringParam('SOURCE_PREFIX', '', 'Bucket prefix to copy from')
         stringParam('DEST_PREFIX', '', 'Bucket prefix to copy to')
