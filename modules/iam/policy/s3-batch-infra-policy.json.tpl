@@ -4,6 +4,20 @@
     {
       "Effect": "Allow",
       "Action": [
+        "s3:ListAllMyBuckets"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketTagging"
+      ],
+      "Resource": "arn:aws:s3:::*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
         "s3:CreateBucket",
         "s3:PutBucketPolicy",
         "s3:PutBucketVersioning",

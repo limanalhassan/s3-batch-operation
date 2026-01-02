@@ -57,50 +57,52 @@ pipeline {
                     def sourceBucket = null
                     def destBucket = null
                     
-                    retry(3) {
-                        def bucketsJson = sh(
-                            script: "aws s3api list-buckets --output json --region ${params.REGION}",
-                            returnStdout: true
-                        ).trim()
-                        
-                        def buckets = sh(
-                            script: "echo '${bucketsJson}' | jq -r '.Buckets[].Name'",
-                            returnStdout: true
-                        ).trim().split('\n')
-                        
-                        for (bucket in buckets) {
-                            try {
-                                def tagsJson = sh(
-                                    script: "aws s3api get-bucket-tagging --bucket ${bucket} --region ${params.REGION} --output json 2>&1",
-                                    returnStdout: true
-                                ).trim()
-                                
-                                if (tagsJson && !tagsJson.contains('NoSuchTagSet')) {
-                                    def operationValue = sh(
-                                        script: "echo '${tagsJson}' | jq -r '.TagSet[] | select(.Key==\"operation\") | .Value'",
+                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy') {
+                        retry(3) {
+                            def bucketsJson = sh(
+                                script: "aws s3api list-buckets --output json --region ${params.REGION}",
+                                returnStdout: true
+                            ).trim()
+                            
+                            def buckets = sh(
+                                script: "echo '${bucketsJson}' | jq -r '.Buckets[].Name'",
+                                returnStdout: true
+                            ).trim().split('\n')
+                            
+                            for (bucket in buckets) {
+                                try {
+                                    def tagsJson = sh(
+                                        script: "aws s3api get-bucket-tagging --bucket ${bucket} --region ${params.REGION} --output json 2>&1",
                                         returnStdout: true
                                     ).trim()
                                     
-                                    def envValue = sh(
-                                        script: "echo '${tagsJson}' | jq -r '.TagSet[] | select(.Key==\"env\") | .Value'",
-                                        returnStdout: true
-                                    ).trim()
-                                    
-                                    def targetValue = sh(
-                                        script: "echo '${tagsJson}' | jq -r '.TagSet[] | select(.Key==\"Target\") | .Value'",
-                                        returnStdout: true
-                                    ).trim()
-                                    
-                                    if (operationValue == env.OPERATION_TAG && envValue == params.ENV_TAG) {
-                                        if (targetValue == 'Source') {
-                                            sourceBucket = bucket
-                                        } else if (targetValue == 'Destination') {
-                                            destBucket = bucket
+                                    if (tagsJson && !tagsJson.contains('NoSuchTagSet')) {
+                                        def operationValue = sh(
+                                            script: "echo '${tagsJson}' | jq -r '.TagSet[] | select(.Key==\"operation\") | .Value'",
+                                            returnStdout: true
+                                        ).trim()
+                                        
+                                        def envValue = sh(
+                                            script: "echo '${tagsJson}' | jq -r '.TagSet[] | select(.Key==\"env\") | .Value'",
+                                            returnStdout: true
+                                        ).trim()
+                                        
+                                        def targetValue = sh(
+                                            script: "echo '${tagsJson}' | jq -r '.TagSet[] | select(.Key==\"Target\") | .Value'",
+                                            returnStdout: true
+                                        ).trim()
+                                        
+                                        if (operationValue == env.OPERATION_TAG && envValue == params.ENV_TAG) {
+                                            if (targetValue == 'Source') {
+                                                sourceBucket = bucket
+                                            } else if (targetValue == 'Destination') {
+                                                destBucket = bucket
+                                            }
                                         }
                                     }
+                                } catch (Exception e) {
+                                    continue
                                 }
-                            } catch (Exception e) {
-                                continue
                             }
                         }
                     }
