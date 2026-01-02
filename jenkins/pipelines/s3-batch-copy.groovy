@@ -127,6 +127,7 @@ pipeline {
                         }
                         
                         stage('Create Report Bucket') {
+                            echo "Creating report bucket: ${env.REPORT_BUCKET}"
                             retry(3) {
                                 def bucketExists = sh(
                                     script: "aws s3api head-bucket --bucket ${env.REPORT_BUCKET} --region ${params.REGION} 2>&1",
@@ -134,22 +135,40 @@ pipeline {
                                 )
                                 
                                 if (bucketExists != 0) {
+                                    echo "Bucket does not exist. Creating..."
                                     def createCmd = params.REGION == 'us-east-1' ? 
                                         "aws s3api create-bucket --bucket ${env.REPORT_BUCKET} --region ${params.REGION}" :
                                         "aws s3api create-bucket --bucket ${env.REPORT_BUCKET} --region ${params.REGION} --create-bucket-configuration LocationConstraint=${params.REGION}"
                                     
+                                    def createExitCode = sh(
+                                        script: "${createCmd} 2>&1",
+                                        returnStatus: true
+                                    )
+                                    
+                                    if (createExitCode != 0) {
+                                        def errorOutput = sh(
+                                            script: "${createCmd} 2>&1",
+                                            returnStdout: true
+                                        )
+                                        error("Failed to create report bucket: ${env.REPORT_BUCKET}. Error: ${errorOutput}")
+                                    }
+                                    
+                                    echo "Bucket created. Setting lifecycle configuration..."
                                     sh """
-                                        ${createCmd}
                                         aws s3api put-bucket-lifecycle-configuration \
                                             --bucket ${env.REPORT_BUCKET} \
                                             --lifecycle-configuration '{"Rules":[{"Id":"DeleteAfter7Days","Status":"Enabled","Expiration":{"Days":7}}]}' \
                                             --region ${params.REGION}
                                     """
+                                    echo "Report bucket created and configured successfully"
+                                } else {
+                                    echo "Report bucket already exists: ${env.REPORT_BUCKET}"
                                 }
                             }
                         }
                         
                         stage('Create Manifest Bucket') {
+                            echo "Creating manifest bucket: ${env.MANIFEST_BUCKET}"
                             retry(3) {
                                 def bucketExists = sh(
                                     script: "aws s3api head-bucket --bucket ${env.MANIFEST_BUCKET} --region ${params.REGION} 2>&1",
@@ -157,17 +176,31 @@ pipeline {
                                 )
                                 
                                 if (bucketExists != 0) {
+                                    echo "Bucket does not exist. Creating..."
                                     def createCmd = params.REGION == 'us-east-1' ? 
                                         "aws s3api create-bucket --bucket ${env.MANIFEST_BUCKET} --region ${params.REGION}" :
                                         "aws s3api create-bucket --bucket ${env.MANIFEST_BUCKET} --region ${params.REGION} --create-bucket-configuration LocationConstraint=${params.REGION}"
                                     
+                                    def createResult = sh(
+                                        script: "${createCmd}",
+                                        returnStdout: true,
+                                        returnStatus: true
+                                    )
+                                    
+                                    if (createResult != 0) {
+                                        error("Failed to create manifest bucket: ${env.MANIFEST_BUCKET}")
+                                    }
+                                    
+                                    echo "Bucket created. Setting lifecycle configuration..."
                                     sh """
-                                        ${createCmd}
                                         aws s3api put-bucket-lifecycle-configuration \
                                             --bucket ${env.MANIFEST_BUCKET} \
                                             --lifecycle-configuration '{"Rules":[{"Id":"DeleteAfter7Days","Status":"Enabled","Expiration":{"Days":7}}]}' \
                                             --region ${params.REGION}
                                     """
+                                    echo "Manifest bucket created and configured successfully"
+                                } else {
+                                    echo "Manifest bucket already exists: ${env.MANIFEST_BUCKET}"
                                 }
                             }
                         }
