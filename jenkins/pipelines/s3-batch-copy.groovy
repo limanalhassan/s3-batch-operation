@@ -408,23 +408,24 @@ pipeline {
                                 ReportScope: "AllTasks"
                             ]
                             
-                            // Convert to JSON and write to files (use individual file parameters)
+                            // Convert to JSON (compact format, single line to avoid shell parsing issues)
                             def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
                             def operationJson = groovy.json.JsonOutput.toJson(operationMap)
                             def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap)
                             def reportJson = groovy.json.JsonOutput.toJson(reportMap)
                             
-                            writeFile file: 'operation.json', text: groovy.json.JsonOutput.prettyPrint(operationJson)
-                            writeFile file: 'manifest-generator.json', text: groovy.json.JsonOutput.prettyPrint(manifestGeneratorJson)
-                            writeFile file: 'report.json', text: groovy.json.JsonOutput.prettyPrint(reportJson)
+                            // Write compact JSON (single line) for shell command substitution
+                            writeFile file: 'operation.json', text: operationJson
+                            writeFile file: 'manifest-generator.json', text: manifestGeneratorJson
+                            writeFile file: 'report.json', text: reportJson
                             
-                            // Show the JSON for debugging
+                            // Show the JSON for debugging (pretty print for readability)
                             echo "=== Operation JSON ==="
-                            sh "cat operation.json"
+                            sh "cat operation.json | jq ."
                             echo "=== Manifest Generator JSON ==="
-                            sh "cat manifest-generator.json"
+                            sh "cat manifest-generator.json | jq ."
                             echo "=== Report JSON ==="
-                            sh "cat report.json"
+                            sh "cat report.json | jq ."
                             
                             // Validate JSON
                             sh """
@@ -433,8 +434,8 @@ pipeline {
                                 python3 -m json.tool report.json > /dev/null && echo "Report JSON is valid" || (echo "Invalid JSON!" && exit 1)
                             """
                             
-                            // Use shell command substitution to read JSON files inline
-                            // This avoids file:// path issues and shell escaping problems
+                            // Use jq -c to ensure compact JSON (single line) and read inline
+                            // This ensures no newlines that could break shell command parsing
                             // Note: --manifest is required by AWS CLI even when using --manifest-generator (AWS CLI quirk)
                             def jobOutput = ''
                             retry(3) {
@@ -442,10 +443,10 @@ pipeline {
                                     script: """
                                         aws s3control create-job \
                                             --account-id ${env.ACCOUNT_NUMBER} \
-                                            --operation "\$(cat ${workspacePath}/operation.json)" \
-                                            --manifest-generator "\$(cat ${workspacePath}/manifest-generator.json)" \
+                                            --operation "\$(jq -c . ${workspacePath}/operation.json)" \
+                                            --manifest-generator "\$(jq -c . ${workspacePath}/manifest-generator.json)" \
                                             --manifest '{}' \
-                                            --report "\$(cat ${workspacePath}/report.json)" \
+                                            --report "\$(jq -c . ${workspacePath}/report.json)" \
                                             --priority ${params.PRIORITY} \
                                             --role-arn ${role3Arn} \
                                             --region ${params.REGION} \
