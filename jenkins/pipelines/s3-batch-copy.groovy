@@ -486,32 +486,67 @@ pipeline {
                             sh "cat manifest-generator.json | jq ."
                             
                             // Use AWS CLI v2 with individual file parameters (most reliable approach)
-                            // First, let's validate the source bucket has objects
-                            echo "Validating source bucket has objects..."
-                            try {
-                                def listOutput = sh(
-                                    script: """
-                                        ${awsCmd} s3api list-objects-v2 \
-                                            --bucket ${env.SOURCE_BUCKET} \
-                                            --max-items 1 \
-                                            --region ${params.REGION} \
-                                            --output json 2>&1
-                                    """,
+                            // CRITICAL: S3JobManifestGenerator requires the source bucket to have an S3 Inventory configured
+                            // Check if source bucket has an inventory configured
+                            echo "Checking if source bucket has S3 Inventory configured (required for S3JobManifestGenerator)..."
+                            def inventoryConfigs = sh(
+                                script: """
+                                    ${awsCmd} s3api list-bucket-inventory-configurations \
+                                        --bucket ${env.SOURCE_BUCKET} \
+                                        --region ${params.REGION} \
+                                        --output json 2>&1 || echo '{"InventoryConfigurations": []}'
+                                """,
+                                returnStdout: true
+                            ).trim()
+                            
+                            def hasInventory = false
+                            if (inventoryConfigs && !inventoryConfigs.contains('An error occurred')) {
+                                def inventoryCount = sh(
+                                    script: "echo '${inventoryConfigs}' | jq -r '.InventoryConfigurations | length'",
                                     returnStdout: true
                                 ).trim()
                                 
-                                // Check if output is valid JSON before parsing
-                                if (listOutput && !listOutput.contains('An error occurred')) {
-                                    def objectCount = sh(
-                                        script: "echo '${listOutput}' | jq -r '.KeyCount // 0'",
-                                        returnStdout: true
-                                    ).trim()
-                                    echo "Source bucket object count (first page): ${objectCount}"
+                                if (inventoryCount.toInteger() > 0) {
+                                    hasInventory = true
+                                    echo "Source bucket has ${inventoryCount} inventory configuration(s)"
+                                    // Show inventory details
+                                    sh "echo '${inventoryConfigs}' | jq '.InventoryConfigurations[] | {Id: .Id, Format: .Destination.S3BucketDestination.Format}'"
                                 } else {
-                                    echo "Warning: Could not validate source bucket objects. Continuing anyway..."
+                                    echo "WARNING: Source bucket has NO inventory configurations!"
                                 }
-                            } catch (Exception e) {
-                                echo "Warning: Source bucket validation failed: ${e.getMessage()}. Continuing anyway..."
+                            } else {
+                                echo "WARNING: Could not check inventory configurations. Error: ${inventoryConfigs}"
+                            }
+                            
+                            if (!hasInventory) {
+                                error("""
+                                    S3JobManifestGenerator requires the source bucket to have an S3 Inventory configured.
+                                    
+                                    Source bucket: ${env.SOURCE_BUCKET}
+                                    
+                                    To fix this, configure an S3 Inventory for the source bucket:
+                                    aws s3api put-bucket-inventory-configuration \\
+                                        --bucket ${env.SOURCE_BUCKET} \\
+                                        --id inventory-config \\
+                                        --inventory-configuration '{
+                                            "Id": "inventory-config",
+                                            "Status": "Enabled",
+                                            "Destination": {
+                                                "S3BucketDestination": {
+                                                    "Bucket": "arn:aws:s3:::${env.MANIFEST_BUCKET}",
+                                                    "Format": "CSV",
+                                                    "Prefix": "inventory/"
+                                                }
+                                            },
+                                            "Schedule": {
+                                                "Frequency": "Daily"
+                                            },
+                                            "IncludedObjectVersions": "All",
+                                            "OptionalFields": ["Size", "LastModifiedDate", "ETag"]
+                                        }'
+                                    
+                                    Note: You may need to wait for the first inventory report to be generated before creating the batch job.
+                                """)
                             }
                             
                             def jobOutput = ''
