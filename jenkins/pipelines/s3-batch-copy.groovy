@@ -456,7 +456,7 @@ pipeline {
                             }
                             
                             def reportMap = [
-                                Bucket: env.REPORT_BUCKET,  // Bucket name, not ARN
+                                Bucket: "arn:aws:s3:::${env.REPORT_BUCKET}",  // Report bucket must be ARN format
                                 Prefix: "reports/",
                                 Format: "Report_CSV_20180820",
                                 Enabled: true,
