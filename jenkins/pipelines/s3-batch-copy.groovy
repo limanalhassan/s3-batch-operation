@@ -439,7 +439,7 @@ pipeline {
                                     EnableManifestOutput: true,
                                     ManifestOutputLocation: [
                                         ExpectedManifestBucketOwner: "${env.ACCOUNT_NUMBER}",  // Must be string
-                                        Bucket: env.MANIFEST_BUCKET,  // Bucket name, not ARN
+                                        Bucket: "arn:aws:s3:::${env.MANIFEST_BUCKET}",  // Bucket ARN format
                                         ManifestPrefix: "manifests/",
                                         ManifestFormat: "S3InventoryReport_CSV_20211130"
                                     ]
@@ -456,7 +456,7 @@ pipeline {
                             }
                             
                             def reportMap = [
-                                Bucket: env.REPORT_BUCKET,  // Bucket name, not ARN (AWS API expects bucket name)
+                                Bucket: "arn:aws:s3:::${env.REPORT_BUCKET}",  // Report bucket must be ARN format
                                 Prefix: "reports/",
                                 Format: "Report_CSV_20180820",
                                 Enabled: true,
