@@ -467,51 +467,60 @@ pipeline {
                             // Note: ManifestGenerator requires AWS CLI v2, but we'll try with --manifest '{}' as workaround
                             def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
                             
-                            // Build complete CLI input JSON (single file approach - more reliable)
-                            // Note: ManifestGenerator should be the inner S3JobManifestGenerator object, not wrapped
-                            def cliInputJson = [
-                                AccountId: "${env.ACCOUNT_NUMBER}",
-                                Operation: operationMap,
-                                ManifestGenerator: manifestGeneratorMap.S3JobManifestGenerator,  // Unwrap the S3JobManifestGenerator
-                                Report: reportMap,
-                                Priority: params.PRIORITY.toInteger(),
-                                RoleArn: role3Arn,
-                                ConfirmationRequired: false
-                            ]
+                            // Write individual JSON files (AWS CLI v2 prefers this approach)
+                            def operationJson = groovy.json.JsonOutput.toJson(operationMap)
+                            def reportJson = groovy.json.JsonOutput.toJson(reportMap)
+                            def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap)
                             
-                            def cliInputJsonString = groovy.json.JsonOutput.toJson(cliInputJson)
-                            writeFile file: 'cli-input.json', text: groovy.json.JsonOutput.prettyPrint(cliInputJsonString)
+                            writeFile file: 'operation.json', text: operationJson
+                            writeFile file: 'report.json', text: reportJson
+                            writeFile file: 'manifest-generator.json', text: manifestGeneratorJson
                             
                             // Show JSON for debugging
-                            echo "=== Complete CLI Input JSON ==="
-                            sh "cat cli-input.json | jq ."
+                            echo "=== Operation JSON ==="
+                            sh "cat operation.json | jq ."
+                            echo "=== Report JSON ==="
+                            sh "cat report.json | jq ."
+                            echo "=== Manifest Generator JSON ==="
+                            sh "cat manifest-generator.json | jq ."
                             
-                            // Validate JSON
-                            sh """
-                                jq . cli-input.json > /dev/null && echo "JSON is valid" || (echo "Invalid JSON!" && exit 1)
-                            """
-                            
-                            // Use AWS CLI v2 with --cli-input-json (single file approach)
+                            // Use AWS CLI v2 with individual file parameters (most reliable approach)
                             def jobOutput = ''
                             retry(3) {
                                 try {
-                                    jobOutput = sh(
+                                    // Capture both stdout and stderr
+                                    def result = sh(
                                         script: """
                                             ${awsCmd} s3control create-job \
-                                                --cli-input-json file://${workspacePath}/cli-input.json \
+                                                --account-id ${env.ACCOUNT_NUMBER} \
+                                                --operation file://${workspacePath}/operation.json \
+                                                --manifest-generator file://${workspacePath}/manifest-generator.json \
+                                                --report file://${workspacePath}/report.json \
+                                                --priority ${params.PRIORITY} \
+                                                --role-arn ${role3Arn} \
                                                 --region ${params.REGION} \
+                                                --no-confirmation-required \
                                                 --output json 2>&1
                                         """,
-                                        returnStdout: true
-                                    ).trim()
+                                        returnStdout: true,
+                                        returnStatus: true
+                                    )
                                     
-                                    // Check if output contains error
+                                    jobOutput = result.output.trim()
+                                    
+                                    if (result.exitValue != 0) {
+                                        echo "AWS CLI Error (exit code ${result.exitValue}): ${jobOutput}"
+                                        error("AWS CLI returned error: ${jobOutput}")
+                                    }
+                                    
+                                    // Check if output contains error message
                                     if (jobOutput.contains('An error occurred')) {
                                         echo "AWS CLI Error: ${jobOutput}"
                                         error("AWS CLI returned error: ${jobOutput}")
                                     }
                                 } catch (Exception e) {
                                     echo "Exception during job creation: ${e.getMessage()}"
+                                    echo "Full error output: ${jobOutput}"
                                     throw e
                                 }
                             }
