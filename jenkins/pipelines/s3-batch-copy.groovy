@@ -269,6 +269,7 @@ pipeline {
                                 }
                             }
                             
+                            // Build execution policy using Groovy map (ensures valid JSON)
                             def executionPolicy = [
                                 Version: "2012-10-17",
                                 Statement: [
@@ -341,10 +342,13 @@ pipeline {
                             
                             // Validate and show JSON
                             sh """
+                                echo "=== Policy JSON ==="
                                 cat batch-job-execution-policy.json
-                                python3 -m json.tool batch-job-execution-policy.json > /dev/null || (echo "Invalid JSON!" && exit 1)
+                                echo "=== Validating JSON ==="
+                                python3 -m json.tool batch-job-execution-policy.json > /dev/null && echo "JSON is valid" || (echo "Invalid JSON!" && exit 1)
                             """
                             
+                            echo "Attaching execution policy to role: ${env.BATCH_JOB_ROLE_NAME}"
                             retry(3) {
                                 sh """
                                     aws iam put-role-policy \
@@ -353,6 +357,7 @@ pipeline {
                                         --policy-document file://${workspacePath}/batch-job-execution-policy.json
                                 """
                             }
+                            echo "Execution policy attached successfully."
                         }
                         
                         stage('Create S3 Batch Job') {
