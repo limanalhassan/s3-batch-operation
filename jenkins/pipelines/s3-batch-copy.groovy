@@ -435,6 +435,7 @@ pipeline {
                             
                             // Use shell command substitution to read JSON files inline
                             // This avoids file:// path issues and shell escaping problems
+                            // Note: --manifest is required by AWS CLI even when using --manifest-generator (AWS CLI quirk)
                             def jobOutput = ''
                             retry(3) {
                                 jobOutput = sh(
@@ -443,6 +444,7 @@ pipeline {
                                             --account-id ${env.ACCOUNT_NUMBER} \
                                             --operation "\$(cat ${workspacePath}/operation.json)" \
                                             --manifest-generator "\$(cat ${workspacePath}/manifest-generator.json)" \
+                                            --manifest '{}' \
                                             --report "\$(cat ${workspacePath}/report.json)" \
                                             --priority ${params.PRIORITY} \
                                             --role-arn ${role3Arn} \
