@@ -593,27 +593,34 @@ pipeline {
                                     
                                     // Run with --debug to get request details
                                     echo "=== Running with --debug to capture request details ==="
-                                    def debugOutput = sh(
-                                        script: """
-                                            ${awsCmd} s3control create-job \\
-                                                --account-id ${env.ACCOUNT_NUMBER} \\
-                                                --operation file://${workspacePath}/operation.json \\
-                                                --manifest-generator file://${workspacePath}/manifest-generator.json \\
-                                                --report file://${workspacePath}/report.json \\
-                                                --priority ${params.PRIORITY} \\
-                                                --role-arn ${role3Arn} \\
-                                                --region ${params.REGION} \\
-                                                --no-confirmation-required \\
-                                                --output json \\
-                                                --debug 2>&1 | grep -A 100 -E "(Request body|body:|InvalidRequest|Request invalid)" | head -200 || true
-                                        """,
-                                        returnStdout: true
-                                    ).trim()
+                                    // Save full debug output to file first
+                                    sh """
+                                        ${awsCmd} s3control create-job \\
+                                            --account-id ${env.ACCOUNT_NUMBER} \\
+                                            --operation file://${workspacePath}/operation.json \\
+                                            --manifest-generator file://${workspacePath}/manifest-generator.json \\
+                                            --report file://${workspacePath}/report.json \\
+                                            --priority ${params.PRIORITY} \\
+                                            --role-arn ${role3Arn} \\
+                                            --region ${params.REGION} \\
+                                            --no-confirmation-required \\
+                                            --output json \\
+                                            --debug 2>&1 | tee ${workspacePath}/aws-debug-full.log || true
+                                    """
                                     
-                                    if (debugOutput) {
-                                        echo "=== DEBUG OUTPUT (filtered) ==="
-                                        echo "${debugOutput}"
-                                    }
+                                    // Extract request body from debug log
+                                    echo "=== REQUEST BODY (from debug log) ==="
+                                    sh """
+                                        grep -A 200 "Request body:" ${workspacePath}/aws-debug-full.log | head -300 || \\
+                                        grep -B 50 -A 50 "body:" ${workspacePath}/aws-debug-full.log | grep -A 200 "body:" | head -300 || \\
+                                        echo "Could not find request body in debug log"
+                                    """
+                                    
+                                    // Show response body
+                                    echo "=== RESPONSE BODY (from debug log) ==="
+                                    sh """
+                                        grep -A 10 "Response body:" ${workspacePath}/aws-debug-full.log | head -20 || true
+                                    """
                                     
                                     error("AWS CLI command failed with exit code ${exitCode}. Output: ${jobOutput}")
                                 }
