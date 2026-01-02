@@ -16,7 +16,6 @@ pipeline {
     
     parameters {
         string(name: 'ACCOUNT_NAME', defaultValue: '', description: 'Account Name (e.g., liman)')
-        string(name: 'S3_BATCH_INFRA_ROLE_NAME', defaultValue: '', description: 'Name of Role 2 (S3 Batch Infrastructure Role)')
         string(name: 'ENV_TAG', defaultValue: '', description: 'Environment tag value to filter buckets (e.g., dev, staging, prod)')
         string(name: 'SOURCE_PREFIX', defaultValue: '', description: 'Bucket prefix to copy from')
         string(name: 'DEST_PREFIX', defaultValue: '', description: 'Bucket prefix to copy to')
@@ -27,8 +26,9 @@ pipeline {
     environment {
         OPERATION_TAG = 's3BatchOperations'
         ACCOUNT_NUMBER = "${getAccountNumber(params.ACCOUNT_NAME)}"
-        S3_BATCH_INFRA_ROLE_ARN = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${params.S3_BATCH_INFRA_ROLE_NAME}"
         NAME_PREFIX = "s3-batch-operations-${params.ACCOUNT_NAME}-${params.ENV_TAG}"
+        S3_BATCH_INFRA_ROLE_NAME = "${env.NAME_PREFIX}-s3-batch-infra-role"
+        S3_BATCH_INFRA_ROLE_ARN = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${env.S3_BATCH_INFRA_ROLE_NAME}"
         REPORT_BUCKET = "${env.NAME_PREFIX}-report-${params.ENV_TAG}"
         MANIFEST_BUCKET = "${env.NAME_PREFIX}-manifest-${params.ENV_TAG}"
         BATCH_JOB_ROLE_NAME = "${env.NAME_PREFIX}-batch-job-role"
@@ -39,8 +39,8 @@ pipeline {
         stage('Validate Parameters') {
             steps {
                 script {
-                    if (!params.ACCOUNT_NAME || !params.S3_BATCH_INFRA_ROLE_NAME || !params.ENV_TAG) {
-                        error('ACCOUNT_NAME, S3_BATCH_INFRA_ROLE_NAME, and ENV_TAG are required parameters')
+                    if (!params.ACCOUNT_NAME || !params.ENV_TAG) {
+                        error('ACCOUNT_NAME and ENV_TAG are required parameters')
                     }
                     
                     if (!env.ACCOUNT_NUMBER || env.ACCOUNT_NUMBER == 'null') {
