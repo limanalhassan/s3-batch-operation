@@ -82,6 +82,14 @@ resource "aws_instance" "jenkins" {
   user_data = base64encode(local.combined_user_data)
   user_data_replace_on_change = true
 
+  # Ensure metadata service is enabled and accessible for instance profile
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "optional"  # Use optional for IMDSv1 compatibility
+    http_put_response_hop_limit = 1
+    instance_metadata_tags     = "enabled"
+  }
+
   root_block_device {
     volume_type = var.volume_type
     volume_size = var.volume_size
