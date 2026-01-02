@@ -467,14 +467,12 @@ pipeline {
                             // Note: ManifestGenerator requires AWS CLI v2, but we'll try with --manifest '{}' as workaround
                             def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
                             
-                            // Write JSON files for individual parameters
-                            def operationJson = groovy.json.JsonOutput.toJson(operationMap)
-                            def reportJson = groovy.json.JsonOutput.toJson(reportMap)
                             // Build complete CLI input JSON (single file approach - more reliable)
+                            // Note: ManifestGenerator should be the inner S3JobManifestGenerator object, not wrapped
                             def cliInputJson = [
                                 AccountId: "${env.ACCOUNT_NUMBER}",
                                 Operation: operationMap,
-                                ManifestGenerator: manifestGeneratorMap,
+                                ManifestGenerator: manifestGeneratorMap.S3JobManifestGenerator,  // Unwrap the S3JobManifestGenerator
                                 Report: reportMap,
                                 Priority: params.PRIORITY.toInteger(),
                                 RoleArn: role3Arn,
