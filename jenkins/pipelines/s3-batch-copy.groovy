@@ -487,9 +487,8 @@ pipeline {
                             
                             // Use AWS CLI v2 with --manifest-generator (requires AWS CLI v2.0.0+)
                             def jobOutput = ''
-                            def errorOutput = ''
                             retry(3) {
-                                def result = sh(
+                                def exitCode = sh(
                                     script: """
                                         ${awsCmd} s3control create-job \
                                             --account-id ${env.ACCOUNT_NUMBER} \
@@ -506,19 +505,18 @@ pipeline {
                                     returnStatus: true
                                 )
                                 
-                                jobOutput = result.output.trim()
-                                if (result.exitValue != 0) {
-                                    errorOutput = jobOutput
-                                    echo "AWS CLI Error Output: ${errorOutput}"
-                                    // Don't exit here, let retry handle it
+                                jobOutput = exitCode.output.trim()
+                                if (exitCode.exitValue != 0) {
+                                    echo "AWS CLI Error (exit code ${exitCode.exitValue}): ${jobOutput}"
+                                    // Continue to retry
                                 }
                             }
                             
-                            // If we still have an error after retries, show detailed error
-                            if (errorOutput && !jobOutput.contains('JobId')) {
+                            // Check if we got a successful response
+                            if (!jobOutput || jobOutput.contains('An error occurred')) {
                                 echo "=== Full Error Details ==="
-                                echo errorOutput
-                                error("Failed to create S3 batch job. Error: ${errorOutput}")
+                                echo jobOutput
+                                error("Failed to create S3 batch job. Error: ${jobOutput}")
                             }
                             
                             def jobId = sh(
