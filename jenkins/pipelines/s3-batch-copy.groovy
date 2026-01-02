@@ -412,29 +412,31 @@ pipeline {
                             }
                             
                             def role3Arn = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${env.BATCH_JOB_ROLE_NAME}"
-                            def filterJson = params.SOURCE_PREFIX ? 
-                                """{"KeyNameConstraint":{"MatchAnyPrefix":["${params.SOURCE_PREFIX}"]}}""" : 
-                                '{}'
-                            def destPath = params.DEST_PREFIX ? "${params.DEST_PREFIX}/" : ""
                             
                             // Build JSON using Groovy maps for proper formatting
-                            // Note: TaggingDirective is not a valid parameter for S3PutObjectCopy
+                            // Note: TargetResource must be bucket ARN only (no path/prefix)
+                            // For DEST_PREFIX, we'll need to handle it via object key transformation if needed
                             def operationMap = [
                                 S3PutObjectCopy: [
-                                    TargetResource: "arn:aws:s3:::${env.DEST_BUCKET}/${destPath}",
+                                    TargetResource: "arn:aws:s3:::${env.DEST_BUCKET}",
                                     CannedAccessControlList: "private",
                                     MetadataDirective: "COPY"
                                 ]
                             ]
                             
+                            // Add TargetKeyPrefix if DEST_PREFIX is provided
+                            if (params.DEST_PREFIX) {
+                                operationMap.S3PutObjectCopy.TargetKeyPrefix = params.DEST_PREFIX
+                            }
+                            
                             def manifestGeneratorMap = [
                                 S3JobManifestGenerator: [
                                     ExpectedBucketOwner: env.ACCOUNT_NUMBER,
-                                    SourceBucket: "arn:aws:s3:::${env.SOURCE_BUCKET}",
+                                    SourceBucket: env.SOURCE_BUCKET,  // Bucket name, not ARN
                                     EnableManifestOutput: true,
                                     ManifestOutputLocation: [
                                         ExpectedManifestBucketOwner: env.ACCOUNT_NUMBER,
-                                        Bucket: "arn:aws:s3:::${env.MANIFEST_BUCKET}",
+                                        Bucket: env.MANIFEST_BUCKET,  // Bucket name, not ARN
                                         ManifestPrefix: "manifests/",
                                         ManifestFormat: "S3InventoryReport_CSV_20211130"
                                     ]
@@ -451,7 +453,7 @@ pipeline {
                             }
                             
                             def reportMap = [
-                                Bucket: "arn:aws:s3:::${env.REPORT_BUCKET}",
+                                Bucket: env.REPORT_BUCKET,  // Bucket name, not ARN
                                 Prefix: "reports/",
                                 Format: "Report_CSV_20180820",
                                 Enabled: true,
