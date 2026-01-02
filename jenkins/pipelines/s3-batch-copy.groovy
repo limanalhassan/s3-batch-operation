@@ -470,36 +470,38 @@ pipeline {
                             // Write JSON files for individual parameters
                             def operationJson = groovy.json.JsonOutput.toJson(operationMap)
                             def reportJson = groovy.json.JsonOutput.toJson(reportMap)
-                            // AWS CLI expects the full structure with S3JobManifestGenerator as top-level key
-                            def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap)
+                            // Build complete CLI input JSON (single file approach - more reliable)
+                            def cliInputJson = [
+                                AccountId: "${env.ACCOUNT_NUMBER}",
+                                Operation: operationMap,
+                                ManifestGenerator: manifestGeneratorMap,
+                                Report: reportMap,
+                                Priority: params.PRIORITY.toInteger(),
+                                RoleArn: role3Arn,
+                                ConfirmationRequired: false
+                            ]
                             
-                            writeFile file: 'operation.json', text: operationJson
-                            writeFile file: 'report.json', text: reportJson
-                            writeFile file: 'manifest-generator.json', text: manifestGeneratorJson
+                            def cliInputJsonString = groovy.json.JsonOutput.toJson(cliInputJson)
+                            writeFile file: 'cli-input.json', text: groovy.json.JsonOutput.prettyPrint(cliInputJsonString)
                             
                             // Show JSON for debugging
-                            echo "=== Operation JSON ==="
-                            sh "cat operation.json | jq ."
-                            echo "=== Report JSON ==="
-                            sh "cat report.json | jq ."
-                            echo "=== Manifest Generator JSON ==="
-                            sh "cat manifest-generator.json | jq ."
+                            echo "=== Complete CLI Input JSON ==="
+                            sh "cat cli-input.json | jq ."
                             
-                            // Use AWS CLI v2 with --manifest-generator (requires AWS CLI v2.0.0+)
+                            // Validate JSON
+                            sh """
+                                jq . cli-input.json > /dev/null && echo "JSON is valid" || (echo "Invalid JSON!" && exit 1)
+                            """
+                            
+                            // Use AWS CLI v2 with --cli-input-json (single file approach)
                             def jobOutput = ''
                             retry(3) {
                                 try {
                                     jobOutput = sh(
                                         script: """
                                             ${awsCmd} s3control create-job \
-                                                --account-id ${env.ACCOUNT_NUMBER} \
-                                                --operation file://${workspacePath}/operation.json \
-                                                --manifest-generator file://${workspacePath}/manifest-generator.json \
-                                                --report file://${workspacePath}/report.json \
-                                                --priority ${params.PRIORITY} \
-                                                --role-arn ${role3Arn} \
+                                                --cli-input-json file://${workspacePath}/cli-input.json \
                                                 --region ${params.REGION} \
-                                                --no-confirmation-required \
                                                 --output json 2>&1
                                         """,
                                         returnStdout: true
