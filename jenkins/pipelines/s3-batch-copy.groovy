@@ -516,11 +516,31 @@ pipeline {
                             
                             def jobOutput = ''
                             retry(3) {
-                                try {
-                                    // Try to get more detailed error information
-                                    // Use --debug to see what's being sent (but this might be too verbose)
-                                    // Instead, let's try the command and capture full output
-                                    def cmd = """
+                                // Capture both stdout and stderr separately for better error handling
+                                def cmd = """
+                                    ${awsCmd} s3control create-job \
+                                        --account-id ${env.ACCOUNT_NUMBER} \
+                                        --operation file://${workspacePath}/operation.json \
+                                        --manifest-generator file://${workspacePath}/manifest-generator.json \
+                                        --report file://${workspacePath}/report.json \
+                                        --priority ${params.PRIORITY} \
+                                        --role-arn ${role3Arn} \
+                                        --region ${params.REGION} \
+                                        --no-confirmation-required \
+                                        --output json 2>&1
+                                """
+                                
+                                echo "Executing command..."
+                                def exitCode = sh(
+                                    script: cmd,
+                                    returnStdout: true,
+                                    returnStatus: true
+                                )
+                                
+                                // When returnStatus is true, result is the exit code (Integer)
+                                // We need to capture output separately
+                                jobOutput = sh(
+                                    script: """
                                         ${awsCmd} s3control create-job \
                                             --account-id ${env.ACCOUNT_NUMBER} \
                                             --operation file://${workspacePath}/operation.json \
@@ -530,43 +550,47 @@ pipeline {
                                             --role-arn ${role3Arn} \
                                             --region ${params.REGION} \
                                             --no-confirmation-required \
-                                            --output json 2>&1
-                                    """
+                                            --output json 2>&1 || true
+                                    """,
+                                    returnStdout: true
+                                ).trim()
+                                
+                                echo "=== COMMAND OUTPUT ==="
+                                echo "${jobOutput}"
+                                echo "=== END OUTPUT ==="
+                                
+                                // Check exit code
+                                if (exitCode != 0) {
+                                    echo "=== ERROR: Command failed with exit code ${exitCode} ==="
+                                    echo "=== Validating JSON files ==="
+                                    sh "echo '=== Operation JSON ===' && jq . ${workspacePath}/operation.json"
+                                    sh "echo '=== Manifest Generator JSON ===' && jq . ${workspacePath}/manifest-generator.json"
+                                    sh "echo '=== Report JSON ===' && jq . ${workspacePath}/report.json"
                                     
-                                    echo "Executing command..."
-                                    jobOutput = sh(
-                                        script: cmd,
-                                        returnStdout: true
-                                    ).trim()
-                                    
-                                    echo "Command output: ${jobOutput}"
-                                    
-                                    // Check if output contains error message
-                                    if (jobOutput.contains('An error occurred') || jobOutput.contains('InvalidRequest') || jobOutput.contains('Request invalid')) {
-                                        echo "=== ERROR DETECTED ==="
-                                        echo "Full output: ${jobOutput}"
-                                        
-                                        // Try to get more details by checking each JSON file individually
-                                        echo "=== Validating JSON files ==="
-                                        sh "jq . ${workspacePath}/operation.json"
-                                        sh "jq . ${workspacePath}/manifest-generator.json"
-                                        sh "jq . ${workspacePath}/report.json"
-                                        
-                                        error("AWS CLI returned error: ${jobOutput}")
+                                    // Try to extract more detailed error message
+                                    if (jobOutput.contains('An error occurred')) {
+                                        def errorMatch = jobOutput =~ /An error occurred \\((.*?)\\) when calling the CreateJob operation: (.*)/
+                                        if (errorMatch) {
+                                            echo "=== DETAILED ERROR ==="
+                                            echo "Error Type: ${errorMatch[0][1]}"
+                                            echo "Error Message: ${errorMatch[0][2]}"
+                                        }
                                     }
                                     
-                                    // If we got here, the command succeeded
-                                    // Verify we got valid JSON with JobId
-                                    if (!jobOutput.contains('JobId')) {
-                                        echo "Warning: Response doesn't contain JobId. Output: ${jobOutput}"
-                                        error("Unexpected response format: ${jobOutput}")
-                                    }
-                                } catch (Exception e) {
-                                    echo "Exception during job creation: ${e.getMessage()}"
-                                    if (jobOutput) {
-                                        echo "Command output: ${jobOutput}"
-                                    }
-                                    throw e
+                                    error("AWS CLI command failed with exit code ${exitCode}. Output: ${jobOutput}")
+                                }
+                                
+                                // Check if output contains error message (even if exit code was 0)
+                                if (jobOutput.contains('An error occurred') || jobOutput.contains('InvalidRequest') || jobOutput.contains('Request invalid')) {
+                                    echo "=== ERROR DETECTED IN OUTPUT ==="
+                                    echo "Full output: ${jobOutput}"
+                                    error("AWS CLI returned error: ${jobOutput}")
+                                }
+                                
+                                // Verify we got valid JSON with JobId
+                                if (!jobOutput.contains('JobId')) {
+                                    echo "Warning: Response doesn't contain JobId. Output: ${jobOutput}"
+                                    error("Unexpected response format: ${jobOutput}")
                                 }
                             }
                             
