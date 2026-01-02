@@ -530,15 +530,23 @@ pipeline {
                                         --output json 2>&1
                                 """
                                 
-                                echo "Executing command..."
-                                def exitCode = sh(
-                                    script: cmd,
-                                    returnStdout: true,
-                                    returnStatus: true
-                                )
+                                echo "Executing command with debug output..."
+                                // First try with --debug to see what's being sent (capture to file to avoid overwhelming logs)
+                                sh """
+                                    ${awsCmd} s3control create-job \
+                                        --account-id ${env.ACCOUNT_NUMBER} \
+                                        --operation file://${workspacePath}/operation.json \
+                                        --manifest-generator file://${workspacePath}/manifest-generator.json \
+                                        --report file://${workspacePath}/report.json \
+                                        --priority ${params.PRIORITY} \
+                                        --role-arn ${role3Arn} \
+                                        --region ${params.REGION} \
+                                        --no-confirmation-required \
+                                        --output json \
+                                        --debug 2>&1 | tee ${workspacePath}/aws-debug.log || true
+                                """
                                 
-                                // When returnStatus is true, result is the exit code (Integer)
-                                // We need to capture output separately
+                                // Extract just the error message from debug output
                                 jobOutput = sh(
                                     script: """
                                         ${awsCmd} s3control create-job \
@@ -554,6 +562,36 @@ pipeline {
                                     """,
                                     returnStdout: true
                                 ).trim()
+                                
+                                // Check exit code
+                                def exitCode = sh(
+                                    script: """
+                                        ${awsCmd} s3control create-job \
+                                            --account-id ${env.ACCOUNT_NUMBER} \
+                                            --operation file://${workspacePath}/operation.json \
+                                            --manifest-generator file://${workspacePath}/manifest-generator.json \
+                                            --report file://${workspacePath}/report.json \
+                                            --priority ${params.PRIORITY} \
+                                            --role-arn ${role3Arn} \
+                                            --region ${params.REGION} \
+                                            --no-confirmation-required \
+                                            --output json 2>&1 > /dev/null; echo $?
+                                    """,
+                                    returnStdout: true
+                                ).trim().toInteger()
+                                
+                                // Show relevant parts of debug log if error occurred
+                                if (exitCode != 0) {
+                                    echo "=== Checking debug log for request details ==="
+                                    sh """
+                                        if [ -f ${workspacePath}/aws-debug.log ]; then
+                                            echo "=== Request Body from debug log ==="
+                                            grep -A 50 "Request body:" ${workspacePath}/aws-debug.log | head -100 || true
+                                            echo "=== Error details from debug log ==="
+                                            grep -A 20 "InvalidRequest\|Request invalid\|error" ${workspacePath}/aws-debug.log | head -50 || true
+                                        fi
+                                    """
+                                }
                                 
                                 echo "=== COMMAND OUTPUT ==="
                                 echo "${jobOutput}"
