@@ -372,22 +372,32 @@ pipeline {
                             // Check if AWS CLI v2 is installed (v2 has 'aws-cli/2' in version string)
                             def isCliV2 = awsCliVersion.contains('aws-cli/2')
                             if (!isCliV2) {
-                                error("""
-                                    ERROR: AWS CLI v1 does not support ManifestGenerator feature.
-                                    
-                                    Current version: ${awsCliVersion}
-                                    
-                                    To use ManifestGenerator, you MUST upgrade to AWS CLI v2.
-                                    
-                                    Installation steps for AWS CLI v2 on Amazon Linux 2:
-                                    1. curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                                    2. unzip awscliv2.zip
-                                    3. sudo ./aws/install
-                                    4. Verify: aws --version (should show aws-cli/2.x.x)
-                                    
-                                    Alternatively, you can use a pre-existing manifest file instead of ManifestGenerator,
-                                    but that requires creating the manifest file manually first.
-                                """)
+                                echo "AWS CLI v1 detected. Upgrading to AWS CLI v2..."
+                                
+                                // Install AWS CLI v2
+                                sh """
+                                    cd /tmp
+                                    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" || exit 1
+                                    unzip -q awscliv2.zip || exit 1
+                                    sudo ./aws/install || exit 1
+                                    rm -f awscliv2.zip
+                                    rm -rf aws
+                                """
+                                
+                                // Verify installation
+                                def newVersion = sh(
+                                    script: "aws --version 2>&1",
+                                    returnStdout: true
+                                ).trim()
+                                echo "New AWS CLI Version: ${newVersion}"
+                                
+                                if (!newVersion.contains('aws-cli/2')) {
+                                    error("Failed to upgrade to AWS CLI v2. Current version: ${newVersion}")
+                                }
+                                
+                                echo "Successfully upgraded to AWS CLI v2"
+                            } else {
+                                echo "AWS CLI v2 is already installed"
                             }
                             
                             def role3Arn = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${env.BATCH_JOB_ROLE_NAME}"
