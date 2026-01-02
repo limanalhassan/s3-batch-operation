@@ -177,13 +177,14 @@ pipeline {
     }
   ]
 }'''
-                            writeFile file: '/tmp/report-lifecycle.json', text: lifecycleConfig
-                            sh "cat /tmp/report-lifecycle.json"
+                            writeFile file: 'report-lifecycle.json', text: lifecycleConfig
+                            def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
+                            sh "cat report-lifecycle.json"
                             retry(3) {
                                 sh """
                                     aws s3api put-bucket-lifecycle-configuration \
                                         --bucket ${env.REPORT_BUCKET} \
-                                        --lifecycle-configuration file:///tmp/report-lifecycle.json \
+                                        --lifecycle-configuration file://${workspacePath}/report-lifecycle.json \
                                         --region ${params.REGION}
                                 """
                             }
@@ -234,13 +235,14 @@ pipeline {
     }
   ]
 }'''
-                            writeFile file: '/tmp/manifest-lifecycle.json', text: lifecycleConfig
-                            sh "cat /tmp/manifest-lifecycle.json"
+                            writeFile file: 'manifest-lifecycle.json', text: lifecycleConfig
+                            def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
+                            sh "cat manifest-lifecycle.json"
                             retry(3) {
                                 sh """
                                     aws s3api put-bucket-lifecycle-configuration \
                                         --bucket ${env.MANIFEST_BUCKET} \
-                                        --lifecycle-configuration file:///tmp/manifest-lifecycle.json \
+                                        --lifecycle-configuration file://${workspacePath}/manifest-lifecycle.json \
                                         --region ${params.REGION}
                                 """
                             }
