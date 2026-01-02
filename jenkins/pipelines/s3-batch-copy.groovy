@@ -432,157 +432,104 @@ pipeline {
                                 echo "WARNING: DEST_PREFIX (${params.DEST_PREFIX}) is provided but S3PutObjectCopy does not support prefix transformation. Objects will be copied with original keys."
                             }
                             
-                            def manifestGeneratorMap = [
-                                S3JobManifestGenerator: [
-                                    ExpectedBucketOwner: "${env.ACCOUNT_NUMBER}",  // Must be string
-                                    SourceBucket: env.SOURCE_BUCKET,  // Bucket name, not ARN
-                                    EnableManifestOutput: true,  // Required parameter - enables manifest output
-                                    ManifestOutputLocation: [
-                                        ExpectedManifestBucketOwner: "${env.ACCOUNT_NUMBER}",  // Must be string
-                                        Bucket: env.MANIFEST_BUCKET,  // Bucket name (not ARN) - matches SourceBucket format
-                                        ManifestPrefix: "manifests/",
-                                        ManifestFormat: "S3InventoryReport_CSV_20211130"
-                                    ]
-                                ]
-                            ]
-                            
-                            // Add Filter only if SOURCE_PREFIX is provided
-                            if (params.SOURCE_PREFIX) {
-                                manifestGeneratorMap.S3JobManifestGenerator.Filter = [
-                                    KeyNameConstraint: [
-                                        MatchAnyPrefix: [params.SOURCE_PREFIX]
-                                    ]
-                                ]
-                            }
-                            
                             def reportMap = [
-                                Bucket: env.REPORT_BUCKET,  // Bucket name (not ARN) - matches ManifestOutputLocation format
+                                Bucket: env.REPORT_BUCKET,  // Bucket name (not ARN)
                                 Prefix: "reports/",
                                 Format: "Report_CSV_20180820",
                                 Enabled: true,
                                 ReportScope: "AllTasks"
                             ]
                             
-                            // AWS CLI v1 doesn't support ManifestGenerator - need to use individual parameters
-                            // Note: ManifestGenerator requires AWS CLI v2, but we'll try with --manifest '{}' as workaround
                             def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
                             
-                            // Write individual JSON files (AWS CLI v2 prefers this approach)
-                            // Note: --manifest-generator file:// expects the wrapped structure with S3JobManifestGenerator as top-level key
+                            // Generate manifest file from source bucket objects
+                            echo "Generating manifest file from source bucket: ${env.SOURCE_BUCKET}"
+                            def manifestFileName = "manifest-${System.currentTimeMillis()}.csv"
+                            def manifestLocalPath = "${workspacePath}/${manifestFileName}"
+                            
+                            // Create manifest CSV file (format: Bucket,Key)
+                            // Header is optional but recommended
+                            sh """
+                                echo "Bucket,Key" > ${manifestLocalPath}
+                            """
+                            
+                            // List objects and append to manifest
+                            def listPrefix = params.SOURCE_PREFIX ?: ""
+                            echo "Listing objects with prefix: '${listPrefix}'"
+                            
+                            sh """
+                                ${awsCmd} s3api list-objects-v2 \
+                                    --bucket ${env.SOURCE_BUCKET} \
+                                    --prefix "${listPrefix}" \
+                                    --region ${params.REGION} \
+                                    --output json | \
+                                jq -r '.Contents[]? | "${env.SOURCE_BUCKET}," + .Key' >> ${manifestLocalPath} || true
+                            """
+                            
+                            // Check if manifest has any objects
+                            def manifestLineCount = sh(
+                                script: "wc -l < ${manifestLocalPath} | tr -d ' '",
+                                returnStdout: true
+                            ).trim().toInteger()
+                            
+                            if (manifestLineCount <= 1) {
+                                error("No objects found in source bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}'. Cannot create batch job with empty manifest.")
+                            }
+                            
+                            echo "Manifest contains ${manifestLineCount - 1} objects (excluding header)"
+                            
+                            // Upload manifest to S3
+                            def manifestS3Key = "manifests/${manifestFileName}"
+                            echo "Uploading manifest to s3://${env.MANIFEST_BUCKET}/${manifestS3Key}"
+                            
+                            sh """
+                                ${awsCmd} s3 cp ${manifestLocalPath} \
+                                    s3://${env.MANIFEST_BUCKET}/${manifestS3Key} \
+                                    --region ${params.REGION}
+                            """
+                            
+                            // Manifest ARN for batch job
+                            def manifestArn = "arn:aws:s3:::${env.MANIFEST_BUCKET}/${manifestS3Key}"
+                            echo "Manifest ARN: ${manifestArn}"
+                            
+                            // Create manifest specification JSON
+                            def manifestSpec = [
+                                Spec: [
+                                    Format: "S3BatchOperations_CSV_20180820",
+                                    Fields: ["Bucket", "Key"]
+                                ],
+                                Location: [
+                                    ObjectArn: manifestArn,
+                                    ETag: sh(
+                                        script: "${awsCmd} s3api head-object --bucket ${env.MANIFEST_BUCKET} --key ${manifestS3Key} --region ${params.REGION} --query ETag --output text | tr -d '\"'",
+                                        returnStdout: true
+                                    ).trim()
+                                ]
+                            ]
+                            
+                            def manifestSpecJson = groovy.json.JsonOutput.toJson(manifestSpec)
+                            writeFile file: 'manifest.json', text: manifestSpecJson
+                            
+                            // Write operation and report JSON files
                             def operationJson = groovy.json.JsonOutput.toJson(operationMap)
                             def reportJson = groovy.json.JsonOutput.toJson(reportMap)
-                            def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap)  // Keep S3JobManifestGenerator wrapper
                             
                             writeFile file: 'operation.json', text: operationJson
                             writeFile file: 'report.json', text: reportJson
-                            writeFile file: 'manifest-generator.json', text: manifestGeneratorJson
                             
                             // Show JSON for debugging
                             echo "=== Operation JSON ==="
                             sh "cat operation.json | jq ."
                             echo "=== Report JSON ==="
                             sh "cat report.json | jq ."
-                            echo "=== Manifest Generator JSON ==="
-                            sh "cat manifest-generator.json | jq ."
-                            
-                            // Use AWS CLI v2 with individual file parameters (most reliable approach)
-                            // CRITICAL: S3JobManifestGenerator REQUIRES an S3 Inventory to be configured on the source bucket
-                            // Check and configure S3 Inventory if missing
-                            echo "Checking S3 Inventory configuration for source bucket: ${env.SOURCE_BUCKET}"
-                            def inventoryId = "s3-batch-manifest-inventory"
-                            def inventoryCheck = sh(
-                                script: """
-                                    ${awsCmd} s3api get-bucket-inventory-configuration \
-                                        --bucket ${env.SOURCE_BUCKET} \
-                                        --id ${inventoryId} \
-                                        --region ${params.REGION} \
-                                        --output json 2>&1 || echo 'NOT_CONFIGURED'
-                                """,
-                                returnStdout: true
-                            ).trim()
-                            
-                            if (inventoryCheck.contains('NOT_CONFIGURED') || inventoryCheck.contains('NoSuchConfiguration')) {
-                                echo "S3 Inventory not configured. Configuring now..."
-                                
-                                // Create inventory configuration JSON
-                                def inventoryConfig = [
-                                    Id: inventoryId,
-                                    IsEnabled: true,
-                                    IncludedObjectVersions: "All",
-                                    Schedule: [
-                                        Frequency: "Daily"
-                                    ],
-                                    Destination: [
-                                        S3BucketDestination: [
-                                            AccountId: env.ACCOUNT_NUMBER,
-                                            Bucket: "arn:aws:s3:::${env.MANIFEST_BUCKET}",
-                                            Format: "CSV",
-                                            Prefix: "inventory-output/"
-                                        ]
-                                    ],
-                                    OptionalFields: [
-                                        "Size",
-                                        "LastModifiedDate",
-                                        "ETag",
-                                        "StorageClass",
-                                        "IsMultipartUploaded",
-                                        "ReplicationStatus",
-                                        "EncryptionStatus"
-                                    ]
-                                ]
-                                
-                                def inventoryConfigJson = groovy.json.JsonOutput.toJson(inventoryConfig)
-                                writeFile file: 'inventory-config.json', text: inventoryConfigJson
-                                
-                                echo "=== Inventory Configuration JSON ==="
-                                sh "cat inventory-config.json | jq ."
-                                
-                                // Configure inventory
-                                sh """
-                                    ${awsCmd} s3api put-bucket-inventory-configuration \
-                                        --bucket ${env.SOURCE_BUCKET} \
-                                        --id ${inventoryId} \
-                                        --inventory-configuration file://${workspacePath}/inventory-config.json \
-                                        --region ${params.REGION}
-                                """
-                                
-                                echo "S3 Inventory configured successfully!"
-                                echo "WARNING: The first inventory report may take up to 24 hours to generate."
-                                echo "The batch job creation may still fail until the first report is available."
-                                echo "Consider waiting for the first inventory report before running this pipeline again."
-                                
-                                // Don't fail the pipeline, but warn the user
-                                echo "ATTENTION: S3 Inventory was just configured. You may need to wait for the first report before the batch job can be created."
-                            } else {
-                                echo "S3 Inventory is already configured for ${env.SOURCE_BUCKET}"
-                                // Show inventory details
-                                try {
-                                    def inventoryDetails = sh(
-                                        script: "echo '${inventoryCheck}' | jq -r '{Id: .Id, IsEnabled: .IsEnabled, Schedule: .Schedule.Frequency}'",
-                                        returnStdout: true
-                                    ).trim()
-                                    echo "Inventory details: ${inventoryDetails}"
-                                } catch (Exception e) {
-                                    echo "Could not parse inventory details, but inventory exists"
-                                }
-                            }
+                            echo "=== Manifest Spec JSON ==="
+                            sh "cat manifest.json | jq ."
+                            echo "=== Manifest file preview (first 10 lines) ==="
+                            sh "head -10 ${manifestLocalPath}"
                             
                             def jobOutput = ''
                             retry(3) {
                                 // Capture both stdout and stderr separately for better error handling
-                                def cmd = """
-                                    ${awsCmd} s3control create-job \
-                                        --account-id ${env.ACCOUNT_NUMBER} \
-                                        --operation file://${workspacePath}/operation.json \
-                                        --manifest-generator file://${workspacePath}/manifest-generator.json \
-                                        --report file://${workspacePath}/report.json \
-                                        --priority ${params.PRIORITY} \
-                                        --role-arn ${role3Arn} \
-                                        --region ${params.REGION} \
-                                        --no-confirmation-required \
-                                        --output json 2>&1
-                                """
-                                
                                 echo "Executing command..."
                                 // Run command and capture both output and exit code
                                 def result = sh(
@@ -590,7 +537,7 @@ pipeline {
                                         ${awsCmd} s3control create-job \\
                                             --account-id ${env.ACCOUNT_NUMBER} \\
                                             --operation file://${workspacePath}/operation.json \\
-                                            --manifest-generator file://${workspacePath}/manifest-generator.json \\
+                                            --manifest file://${workspacePath}/manifest.json \\
                                             --report file://${workspacePath}/report.json \\
                                             --priority ${params.PRIORITY} \\
                                             --role-arn ${role3Arn} \\
@@ -609,7 +556,7 @@ pipeline {
                                         ${awsCmd} s3control create-job \\
                                             --account-id ${env.ACCOUNT_NUMBER} \\
                                             --operation file://${workspacePath}/operation.json \\
-                                            --manifest-generator file://${workspacePath}/manifest-generator.json \\
+                                            --manifest file://${workspacePath}/manifest.json \\
                                             --report file://${workspacePath}/report.json \\
                                             --priority ${params.PRIORITY} \\
                                             --role-arn ${role3Arn} \\
@@ -631,7 +578,7 @@ pipeline {
                                     echo "=== ERROR: Command failed with exit code ${exitCode} ==="
                                     echo "=== Validating JSON files ==="
                                     sh "echo '=== Operation JSON ===' && jq . ${workspacePath}/operation.json"
-                                    sh "echo '=== Manifest Generator JSON ===' && jq . ${workspacePath}/manifest-generator.json"
+                                    sh "echo '=== Manifest Spec JSON ===' && jq . ${workspacePath}/manifest.json"
                                     sh "echo '=== Report JSON ===' && jq . ${workspacePath}/report.json"
                                     
                                     // Try to extract more detailed error message
@@ -651,7 +598,7 @@ pipeline {
                                         ${awsCmd} s3control create-job \\
                                             --account-id ${env.ACCOUNT_NUMBER} \\
                                             --operation file://${workspacePath}/operation.json \\
-                                            --manifest-generator file://${workspacePath}/manifest-generator.json \\
+                                            --manifest file://${workspacePath}/manifest.json \\
                                             --report file://${workspacePath}/report.json \\
                                             --priority ${params.PRIORITY} \\
                                             --role-arn ${role3Arn} \\
