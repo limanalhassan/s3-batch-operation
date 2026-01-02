@@ -157,7 +157,7 @@ pipeline {
                                     sh """
                                         aws s3api put-bucket-lifecycle-configuration \
                                             --bucket ${env.REPORT_BUCKET} \
-                                            --lifecycle-configuration '{"Rules":[{"Id":"DeleteAfter7Days","Status":"Enabled","Expiration":{"Days":7}}]}' \
+                                            --lifecycle-configuration '{"Rules":[{"ID":"DeleteAfter7Days","Status":"Enabled","Expiration":{"Days":7}}]}' \
                                             --region ${params.REGION}
                                     """
                                     echo "Report bucket created and configured successfully"
@@ -195,7 +195,7 @@ pipeline {
                                     sh """
                                         aws s3api put-bucket-lifecycle-configuration \
                                             --bucket ${env.MANIFEST_BUCKET} \
-                                            --lifecycle-configuration '{"Rules":[{"Id":"DeleteAfter7Days","Status":"Enabled","Expiration":{"Days":7}}]}' \
+                                            --lifecycle-configuration '{"Rules":[{"ID":"DeleteAfter7Days","Status":"Enabled","Expiration":{"Days":7}}]}' \
                                             --region ${params.REGION}
                                     """
                                     echo "Manifest bucket created and configured successfully"
