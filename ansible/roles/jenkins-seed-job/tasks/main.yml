@@ -1,0 +1,84 @@
+---
+# Tasks for jenkins-seed-job role
+
+- name: Validate required variables are set
+  fail:
+    msg: "Required variable 'jenkins_seed_git_url' is not set. Please configure it in group_vars/all.yml"
+  when: jenkins_seed_git_url | default('') == ''
+
+- name: Validate Git credentials ID is set
+  fail:
+    msg: "Required variable 'jenkins_seed_git_credentials_id' is not set. Please configure it in group_vars/all.yml"
+  when: jenkins_seed_git_credentials_id | default('') == ''
+
+- name: Check if Jenkins CLI jar exists
+  stat:
+    path: "{{ jenkins_seed_jenkins_cli_jar }}"
+  register: jenkins_cli_jar_stat
+
+- name: Fail if Jenkins CLI jar not found
+  fail:
+    msg: "Jenkins CLI jar not found at {{ jenkins_seed_jenkins_cli_jar }}. Ensure Jenkins role has run first."
+  when: not jenkins_cli_jar_stat.stat.exists
+
+- name: Wait for Jenkins to be ready
+  uri:
+    url: "http://{{ jenkins_seed_jenkins_hostname }}:{{ jenkins_seed_jenkins_port }}{{ jenkins_seed_jenkins_url_prefix }}/cli/"
+    method: GET
+    return_content: yes
+    timeout: 5
+    status_code: 200,403
+  register: jenkins_ready
+  until: (jenkins_ready.status == 403 or jenkins_ready.status == 200) and (jenkins_ready.content.find("Please wait while") == -1)
+  retries: 30
+  delay: 5
+  changed_when: false
+
+- name: Check if seed job already exists
+  command: >
+    java -jar {{ jenkins_seed_jenkins_cli_jar }}
+    -s http://{{ jenkins_seed_jenkins_hostname }}:{{ jenkins_seed_jenkins_port }}{{ jenkins_seed_jenkins_url_prefix }}
+    -auth {{ jenkins_seed_jenkins_admin_username }}:{{ jenkins_seed_jenkins_admin_password }}
+    get-job {{ jenkins_seed_job_name }}
+  register: seed_job_exists
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Generate seed job XML configuration
+  template:
+    src: seed-job-config.xml.j2
+    dest: /tmp/{{ jenkins_seed_job_name }}-config.xml
+
+- name: Create seed job using Jenkins CLI
+  shell: >
+    java -jar {{ jenkins_seed_jenkins_cli_jar }}
+    -s http://{{ jenkins_seed_jenkins_hostname }}:{{ jenkins_seed_jenkins_port }}{{ jenkins_seed_jenkins_url_prefix }}
+    -auth {{ jenkins_seed_jenkins_admin_username }}:{{ jenkins_seed_jenkins_admin_password }}
+    create-job {{ jenkins_seed_job_name }} < /tmp/{{ jenkins_seed_job_name }}-config.xml
+  register: create_seed_job
+  when: seed_job_exists.rc != 0
+  changed_when: true
+  no_log: false
+
+- name: Update existing seed job configuration
+  shell: >
+    java -jar {{ jenkins_seed_jenkins_cli_jar }}
+    -s http://{{ jenkins_seed_jenkins_hostname }}:{{ jenkins_seed_jenkins_port }}{{ jenkins_seed_jenkins_url_prefix }}
+    -auth {{ jenkins_seed_jenkins_admin_username }}:{{ jenkins_seed_jenkins_admin_password }}
+    update-job {{ jenkins_seed_job_name }} < /tmp/{{ jenkins_seed_job_name }}-config.xml
+  register: update_seed_job
+  when: seed_job_exists.rc == 0
+  changed_when: true
+  no_log: false
+
+- name: Clean up temporary config file
+  file:
+    path: /tmp/{{ jenkins_seed_job_name }}-config.xml
+    state: absent
+  when: create_seed_job.changed or update_seed_job.changed
+
+- name: Display seed job creation status
+  debug:
+    msg: "Seed job '{{ jenkins_seed_job_name }}' has been {{ 'created' if create_seed_job.changed else 'updated' if update_seed_job.changed else 'already exists' }}"
+

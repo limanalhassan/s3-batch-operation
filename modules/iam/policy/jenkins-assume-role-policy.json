@@ -1,0 +1,14 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": [
+        "arn:aws:iam::*:role/DeployS3BatchOperations*",
+        "arn:aws:iam::*:role/*-s3-batch-infra-role"
+      ]
+    }
+  ]
+}
+

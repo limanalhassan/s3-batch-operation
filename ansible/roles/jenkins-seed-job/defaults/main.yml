@@ -1,0 +1,36 @@
+---
+# Default variables for jenkins-seed-job role
+# 
+# NOTE: Most configuration should be set in group_vars/all.yml for project-specific values.
+# These defaults provide fallback values and internal role configuration.
+# Variables set in group_vars/all.yml will override these defaults.
+
+# Jenkins connection details (inherited from geerlingguy.jenkins role)
+jenkins_seed_jenkins_hostname: "{{ jenkins_hostname | default('localhost') }}"
+jenkins_seed_jenkins_port: "{{ jenkins_http_port | default(8080) }}"
+jenkins_seed_jenkins_url_prefix: "{{ jenkins_url_prefix | default('') }}"
+jenkins_seed_jenkins_cli_jar: "{{ jenkins_jar_location | default('/opt/jenkins-cli.jar') }}"
+jenkins_seed_jenkins_admin_username: "{{ jenkins_admin_username | default('admin') }}"
+jenkins_seed_jenkins_admin_password: "{{ jenkins_admin_password | default('') }}"
+
+# Seed job configuration
+# Override these in group_vars/all.yml for your project
+jenkins_seed_job_name: "seed-job"
+jenkins_seed_job_display_name: "Seed Job"
+jenkins_seed_job_description: "Automated seed job for creating Jenkins jobs from Job DSL scripts"
+
+# Git repository configuration
+# REQUIRED: Set these in group_vars/all.yml for your project
+jenkins_seed_git_url: ""
+jenkins_seed_git_branch: "main"
+jenkins_seed_git_credentials_id: ""
+
+# Job DSL script path in repository
+jenkins_seed_dsl_script_path: "jenkins/seed_job/seed.groovy"
+
+# Build triggers (empty = manual only, cron format for polling)
+jenkins_seed_poll_scm: ""
+
+# Groovy Sandbox
+jenkins_seed_use_sandbox: false
+
