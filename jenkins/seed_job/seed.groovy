@@ -11,7 +11,7 @@ folder('S3-Batch-Operations/Dev') {
 println("Folders created successfully!")
 
 pipelineJob('S3-Batch-Operations/Dev/S3-Batch-Copy') {
-    displayName('S3 Batch Copy Operationxxxxx')
+    displayName('S3 Batch Copy Operation')
     description('Create S3 Batch Operations job to copy objects from source to destination bucket')
     
     parameters {
