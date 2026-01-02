@@ -534,15 +534,15 @@ pipeline {
                                 // Run command and capture output
                                 jobOutput = sh(
                                     script: """
-                                        ${awsCmd} s3control create-job \
-                                            --account-id ${env.ACCOUNT_NUMBER} \
-                                            --operation file://${workspacePath}/operation.json \
-                                            --manifest-generator file://${workspacePath}/manifest-generator.json \
-                                            --report file://${workspacePath}/report.json \
-                                            --priority ${params.PRIORITY} \
-                                            --role-arn ${role3Arn} \
-                                            --region ${params.REGION} \
-                                            --no-confirmation-required \
+                                        ${awsCmd} s3control create-job \\
+                                            --account-id ${env.ACCOUNT_NUMBER} \\
+                                            --operation file://${workspacePath}/operation.json \\
+                                            --manifest-generator file://${workspacePath}/manifest-generator.json \\
+                                            --report file://${workspacePath}/report.json \\
+                                            --priority ${params.PRIORITY} \\
+                                            --role-arn ${role3Arn} \\
+                                            --region ${params.REGION} \\
+                                            --no-confirmation-required \\
                                             --output json 2>&1 || true
                                     """,
                                     returnStdout: true
@@ -551,16 +551,16 @@ pipeline {
                                 // Check exit code separately
                                 def exitCode = sh(
                                     script: """
-                                        ${awsCmd} s3control create-job \
-                                            --account-id ${env.ACCOUNT_NUMBER} \
-                                            --operation file://${workspacePath}/operation.json \
-                                            --manifest-generator file://${workspacePath}/manifest-generator.json \
-                                            --report file://${workspacePath}/report.json \
-                                            --priority ${params.PRIORITY} \
-                                            --role-arn ${role3Arn} \
-                                            --region ${params.REGION} \
-                                            --no-confirmation-required \
-                                            --output json > /dev/null 2>&1; echo $?
+                                        ${awsCmd} s3control create-job \\
+                                            --account-id ${env.ACCOUNT_NUMBER} \\
+                                            --operation file://${workspacePath}/operation.json \\
+                                            --manifest-generator file://${workspacePath}/manifest-generator.json \\
+                                            --report file://${workspacePath}/report.json \\
+                                            --priority ${params.PRIORITY} \\
+                                            --role-arn ${role3Arn} \\
+                                            --region ${params.REGION} \\
+                                            --no-confirmation-required \\
+                                            --output json > /dev/null 2>&1; echo \$?
                                     """,
                                     returnStdout: true
                                 ).trim().toInteger()
@@ -569,16 +569,16 @@ pipeline {
                                 if (exitCode != 0) {
                                     echo "=== Running with --debug to capture request details ==="
                                     sh """
-                                        ${awsCmd} s3control create-job \
-                                            --account-id ${env.ACCOUNT_NUMBER} \
-                                            --operation file://${workspacePath}/operation.json \
-                                            --manifest-generator file://${workspacePath}/manifest-generator.json \
-                                            --report file://${workspacePath}/report.json \
-                                            --priority ${params.PRIORITY} \
-                                            --role-arn ${role3Arn} \
-                                            --region ${params.REGION} \
-                                            --no-confirmation-required \
-                                            --output json \
+                                        ${awsCmd} s3control create-job \\
+                                            --account-id ${env.ACCOUNT_NUMBER} \\
+                                            --operation file://${workspacePath}/operation.json \\
+                                            --manifest-generator file://${workspacePath}/manifest-generator.json \\
+                                            --report file://${workspacePath}/report.json \\
+                                            --priority ${params.PRIORITY} \\
+                                            --role-arn ${role3Arn} \\
+                                            --region ${params.REGION} \\
+                                            --no-confirmation-required \\
+                                            --output json \\
                                             --debug 2>&1 | grep -E "(Request body|InvalidRequest|Request invalid|error|Error)" | head -100 || true
                                     """
                                 }
