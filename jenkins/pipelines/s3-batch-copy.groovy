@@ -488,17 +488,31 @@ pipeline {
                             // Use AWS CLI v2 with individual file parameters (most reliable approach)
                             // First, let's validate the source bucket has objects
                             echo "Validating source bucket has objects..."
-                            def objectCount = sh(
-                                script: """
-                                    ${awsCmd} s3api list-objects-v2 \
-                                        --bucket ${env.SOURCE_BUCKET} \
-                                        --max-items 1 \
-                                        --region ${params.REGION} \
-                                        --output json 2>&1 | jq -r '.KeyCount // 0'
-                                """,
-                                returnStdout: true
-                            ).trim()
-                            echo "Source bucket object count (first page): ${objectCount}"
+                            try {
+                                def listOutput = sh(
+                                    script: """
+                                        ${awsCmd} s3api list-objects-v2 \
+                                            --bucket ${env.SOURCE_BUCKET} \
+                                            --max-items 1 \
+                                            --region ${params.REGION} \
+                                            --output json 2>&1
+                                    """,
+                                    returnStdout: true
+                                ).trim()
+                                
+                                // Check if output is valid JSON before parsing
+                                if (listOutput && !listOutput.contains('An error occurred')) {
+                                    def objectCount = sh(
+                                        script: "echo '${listOutput}' | jq -r '.KeyCount // 0'",
+                                        returnStdout: true
+                                    ).trim()
+                                    echo "Source bucket object count (first page): ${objectCount}"
+                                } else {
+                                    echo "Warning: Could not validate source bucket objects. Continuing anyway..."
+                                }
+                            } catch (Exception e) {
+                                echo "Warning: Source bucket validation failed: ${e.getMessage()}. Continuing anyway..."
+                            }
                             
                             def jobOutput = ''
                             retry(3) {
