@@ -10,21 +10,25 @@ folder('S3-Batch-Operations/Dev') {
 
 println("Folders created successfully!")
 
-// S3 Copy Job - References Jenkinsfile from jenkins/pipelines/
-pipelineJob('S3-Batch-Operations/Dev/S3-Copy') {
-    displayName('S3 Copy Operation')
-    description('Copy objects from source to destination bucket')
+pipelineJob('S3-Batch-Operations/Dev/S3-Batch-Copy') {
+    displayName('S3 Batch Copy Operation')
+    description('Create S3 Batch Operations job to copy objects from source to destination bucket')
     
     parameters {
-        stringParam('SOURCE_BUCKET', '', 'Source S3 bucket name')
-        stringParam('DEST_BUCKET', '', 'Destination S3 bucket name')
-        stringParam('PREFIX', '', 'Object prefix filter (optional)')
-        booleanParam('DRY_RUN', true, 'Dry run mode (no actual copy)')
+        stringParam('ACCOUNT_NUMBER', '', 'AWS Account Number')
+        stringParam('ACCOUNT_NAME', '', 'Account Name')
+        stringParam('S3_BATCH_INFRA_ROLE_ARN', '', 'ARN of Role 2 (S3 Batch Infrastructure Role)')
+        stringParam('OPERATION_TAG', 's3BatchOperations', 'Operation tag value to filter buckets')
+        stringParam('ENV_TAG', '', 'Environment tag value to filter buckets (e.g., dev, staging, prod)')
+        stringParam('SOURCE_PREFIX', '', 'Bucket prefix to copy from')
+        stringParam('DEST_PREFIX', '', 'Bucket prefix to copy to')
+        stringParam('REGION', 'us-east-1', 'AWS Region')
+        stringParam('PRIORITY', '2', 'Job priority (higher number = higher priority)')
     }
     
     definition {
         cps {
-            script(readFileFromWorkspace('jenkins/pipelines/s3-copy.groovy'))
+            script(readFileFromWorkspace('jenkins/pipelines/s3-batch-copy.groovy'))
             sandbox(true)
         }
     }

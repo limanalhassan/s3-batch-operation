@@ -52,4 +52,5 @@
   roles:
     - common
     - geerlingguy.jenkins
+    - jenkins-seed-job
 

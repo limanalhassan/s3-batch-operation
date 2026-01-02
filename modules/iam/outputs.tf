@@ -1,20 +1,20 @@
 output "role_arn" {
   description = "ARN of the IAM role"
-  value       = aws_iam_role.jenkins_role.arn
+  value       = aws_iam_role.this.arn
 }
 
 output "role_name" {
   description = "Name of the IAM role"
-  value       = aws_iam_role.jenkins_role.name
+  value       = aws_iam_role.this.name
 }
 
 output "instance_profile_name" {
-  description = "Name of the IAM instance profile"
-  value       = aws_iam_instance_profile.jenkins_profile.name
+  description = "Name of the IAM instance profile (null if not created)"
+  value       = var.create_instance_profile ? aws_iam_instance_profile.this[0].name : null
 }
 
 output "instance_profile_arn" {
-  description = "ARN of the IAM instance profile"
-  value       = aws_iam_instance_profile.jenkins_profile.arn
+  description = "ARN of the IAM instance profile (null if not created)"
+  value       = var.create_instance_profile ? aws_iam_instance_profile.this[0].arn : null
 }
 

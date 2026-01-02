@@ -39,11 +39,32 @@ module "keypair" {
   tags = local.common_tags
 }
 
-module "iam" {
+module "iam_jenkins" {
   source = "../modules/iam"
 
   role_name             = "${local.name_prefix}-jenkins-role"
-  instance_profile_name = "${local.name_prefix}-jenkins-profile"
+  assume_role_policy    = file("${path.module}/../modules/iam/policy/jenkins-role-trust-policy.json")
+  policy_file            = "jenkins-assume-role-policy.json"
+  policy_name            = "AssumeS3BatchOperationsRole"
+  create_instance_profile = true
+  instance_profile_name  = "${local.name_prefix}-jenkins-profile"
+
+  tags = local.common_tags
+}
+
+module "iam_s3_batch_infra" {
+  source = "../modules/iam"
+
+  role_name              = "${local.name_prefix}-s3-batch-infra-role"
+  assume_role_policy     = templatefile("${path.module}/../modules/iam/policy/s3-batch-infra-role-trust-policy.json.tpl", {
+    jenkins_role_arn = module.iam_jenkins.role_arn
+  })
+  policy_template_file   = "s3-batch-infra-policy.json.tpl"
+  policy_template_vars    = {
+    name_prefix = local.name_prefix
+  }
+  policy_name            = "S3BatchInfrastructureCreationPolicy"
+  create_instance_profile = false
 
   tags = local.common_tags
 }
@@ -137,7 +158,7 @@ module "ec2" {
   key_name                 = var.create_key_pair ? module.keypair[0].key_name : var.key_name
   vpc_id                   = module.vpc.vpc_id
   subnet_id                = var.use_private_subnet ? module.vpc.private_subnet_ids[0] : module.vpc.public_subnet_ids[0]
-  iam_instance_profile_name = module.iam.instance_profile_name
+  iam_instance_profile_name = module.iam_jenkins.instance_profile_name
   security_group_ids       = [module.security_group.security_group_id]
   volume_type              = var.volume_type
   volume_size              = var.volume_size

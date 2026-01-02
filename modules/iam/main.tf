@@ -7,44 +7,32 @@ terraform {
   }
 }
 
-resource "aws_iam_role" "jenkins_role" {
+resource "aws_iam_role" "this" {
   name = var.role_name
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-      }
-    ]
-  })
+  assume_role_policy = var.assume_role_policy
 
   tags = var.tags
 }
 
-resource "aws_iam_role_policy" "assume_s3_batch_operations_role" {
-  name = "AssumeS3BatchOperationsRole"
-  role = aws_iam_role.jenkins_role.id
+resource "aws_iam_role_policy" "this" {
+  count = var.policy_file != null || var.policy_template_file != null ? 1 : 0
+  
+  name = var.policy_name
+  role = aws_iam_role.this.id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = "sts:AssumeRole"
-        Resource = "arn:aws:iam::*:role/DeployS3BatchOperations*"
-      }
-    ]
-  })
+  policy = var.policy_template_file != null ? (
+    templatefile("${path.module}/policy/${var.policy_template_file}", var.policy_template_vars)
+  ) : (
+    file("${path.module}/policy/${var.policy_file}")
+  )
 }
 
-resource "aws_iam_instance_profile" "jenkins_profile" {
-  name = var.instance_profile_name
-  role = aws_iam_role.jenkins_role.name
+resource "aws_iam_instance_profile" "this" {
+  count = var.create_instance_profile ? 1 : 0
+  
+  name = var.instance_profile_name != null ? var.instance_profile_name : "${var.role_name}-profile"
+  role = aws_iam_role.this.name
 
   tags = var.tags
 }

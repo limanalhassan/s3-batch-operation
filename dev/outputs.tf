@@ -45,17 +45,27 @@ output "jenkins_security_group_id" {
 
 output "jenkins_iam_role_arn" {
   description = "ARN of the Jenkins IAM role"
-  value       = module.iam.role_arn
+  value       = module.iam_jenkins.role_arn
 }
 
 output "jenkins_iam_role_name" {
   description = "Name of the Jenkins IAM role"
-  value       = module.iam.role_name
+  value       = module.iam_jenkins.role_name
 }
 
 output "jenkins_instance_profile_name" {
   description = "Name of the Jenkins IAM instance profile"
-  value       = module.iam.instance_profile_name
+  value       = module.iam_jenkins.instance_profile_name
+}
+
+output "s3_batch_infra_role_arn" {
+  description = "ARN of the S3 batch infrastructure creation IAM role"
+  value       = module.iam_s3_batch_infra.role_arn
+}
+
+output "s3_batch_infra_role_name" {
+  description = "Name of the S3 batch infrastructure creation IAM role"
+  value       = module.iam_s3_batch_infra.role_name
 }
 
 output "s3_source_bucket_id" {
