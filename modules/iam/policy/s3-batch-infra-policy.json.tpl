@@ -11,7 +11,9 @@
     {
       "Effect": "Allow",
       "Action": [
-        "s3:GetBucketTagging"
+        "s3:GetBucketTagging",
+        "s3:GetInventoryConfiguration",
+        "s3:ListBucket"
       ],
       "Resource": "arn:aws:s3:::*"
     },
