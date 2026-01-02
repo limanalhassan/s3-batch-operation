@@ -30,6 +30,7 @@
         "s3:PutBucketEncryption",
         "s3:PutBucketTagging",
         "s3:PutBucketLifecycleConfiguration",
+        "s3:PutLifecycleConfiguration",
         "s3:GetBucketLocation",
         "s3:GetBucketVersioning"
       ],
