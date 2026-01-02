@@ -269,81 +269,81 @@ pipeline {
                                 }
                             }
                             
-                            def executionPolicy = """
-                            {
-                                "Version": "2012-10-17",
-                                "Statement": [
-                                    {
-                                        "Effect": "Allow",
-                                        "Action": [
-                                            "s3:GetObject",
-                                            "s3:GetObjectVersion",
-                                            "s3:GetObjectTagging",
-                                            "s3:GetObjectVersionTagging",
-                                            "s3:ListBucket"
-                                        ],
-                                        "Resource": [
-                                            "arn:aws:s3:::${env.SOURCE_BUCKET}",
-                                            "arn:aws:s3:::${env.SOURCE_BUCKET}/*"
-                                        ]
-                                    },
-                                    {
-                                        "Effect": "Allow",
-                                        "Action": [
-                                            "s3:PutObject",
-                                            "s3:PutObjectTagging",
-                                            "s3:GetObject",
-                                            "s3:GetObjectVersion",
-                                            "s3:ListBucket"
-                                        ],
-                                        "Resource": [
-                                            "arn:aws:s3:::${env.DEST_BUCKET}",
-                                            "arn:aws:s3:::${env.DEST_BUCKET}/*"
-                                        ]
-                                    },
-                                    {
-                                        "Effect": "Allow",
-                                        "Action": [
-                                            "s3:GetObject",
-                                            "s3:GetObjectVersion",
-                                            "s3:ListBucket"
-                                        ],
-                                        "Resource": [
-                                            "arn:aws:s3:::${env.MANIFEST_BUCKET}",
-                                            "arn:aws:s3:::${env.MANIFEST_BUCKET}/*"
-                                        ]
-                                    },
-                                    {
-                                        "Effect": "Allow",
-                                        "Action": [
-                                            "s3:PutObject",
-                                            "s3:ListBucket"
-                                        ],
-                                        "Resource": [
-                                            "arn:aws:s3:::${env.REPORT_BUCKET}",
-                                            "arn:aws:s3:::${env.REPORT_BUCKET}/*",
-                                            "arn:aws:s3:::${env.MANIFEST_BUCKET}/*"
-                                        ]
-                                    },
-                                    {
-                                        "Effect": "Allow",
-                                        "Action": [
-                                            "s3:PutInventoryConfiguration"
-                                        ],
-                                        "Resource": "arn:aws:s3:::${env.DEST_BUCKET}"
-                                    }
-                                ]
-                            }
-                            """
+                            def executionPolicy = """{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:GetObjectTagging",
+        "s3:GetObjectVersionTagging",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${env.SOURCE_BUCKET}",
+        "arn:aws:s3:::${env.SOURCE_BUCKET}/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:PutObjectTagging",
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${env.DEST_BUCKET}",
+        "arn:aws:s3:::${env.DEST_BUCKET}/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${env.MANIFEST_BUCKET}",
+        "arn:aws:s3:::${env.MANIFEST_BUCKET}/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${env.REPORT_BUCKET}",
+        "arn:aws:s3:::${env.REPORT_BUCKET}/*",
+        "arn:aws:s3:::${env.MANIFEST_BUCKET}/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutInventoryConfiguration"
+      ],
+      "Resource": "arn:aws:s3:::${env.DEST_BUCKET}"
+    }
+  ]
+}"""
                             
-                            writeFile file: '/tmp/batch-job-execution-policy.json', text: executionPolicy
+                            writeFile file: 'batch-job-execution-policy.json', text: executionPolicy.stripIndent()
+                            def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
+                            sh "cat batch-job-execution-policy.json"
                             
                             retry(3) {
                                 sh """
                                     aws iam put-role-policy \
                                         --role-name ${env.BATCH_JOB_ROLE_NAME} \
                                         --policy-name BatchJobExecutionPolicy \
-                                        --policy-document file:///tmp/batch-job-execution-policy.json
+                                        --policy-document file://${workspacePath}/batch-job-execution-policy.json
                                 """
                             }
                         }
