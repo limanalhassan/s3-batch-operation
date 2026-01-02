@@ -361,6 +361,14 @@ pipeline {
                         }
                         
                         stage('Create S3 Batch Job') {
+                            // Check AWS CLI version (manifest-generator requires AWS CLI v2.0.0+)
+                            echo "Checking AWS CLI version..."
+                            def awsCliVersion = sh(
+                                script: "aws --version 2>&1",
+                                returnStdout: true
+                            ).trim()
+                            echo "AWS CLI Version: ${awsCliVersion}"
+                            
                             def role3Arn = "arn:aws:iam::${env.ACCOUNT_NUMBER}:role/${env.BATCH_JOB_ROLE_NAME}"
                             def filterJson = params.SOURCE_PREFIX ? 
                                 """{"KeyNameConstraint":{"MatchAnyPrefix":["${params.SOURCE_PREFIX}"]}}""" : 
@@ -434,24 +442,48 @@ pipeline {
                                 python3 -m json.tool report.json > /dev/null && echo "Report JSON is valid" || (echo "Invalid JSON!" && exit 1)
                             """
                             
-                            // Use jq -c to ensure compact JSON (single line) and read inline
-                            // This ensures no newlines that could break shell command parsing
-                            // Note: --manifest is required by AWS CLI even when using --manifest-generator (AWS CLI quirk)
+                            // Use Python with boto3 to create the job (more reliable than AWS CLI)
+                            // This avoids AWS CLI version compatibility issues with --manifest-generator
+                            def pythonScript = """
+import json
+import boto3
+import sys
+
+# Read JSON files
+with open('${workspacePath}/operation.json', 'r') as f:
+    operation = json.load(f)
+
+with open('${workspacePath}/manifest-generator.json', 'r') as f:
+    manifest_generator = json.load(f)
+
+with open('${workspacePath}/report.json', 'r') as f:
+    report = json.load(f)
+
+# Create S3 Control client
+s3control = boto3.client('s3control', region_name='${params.REGION}')
+
+# Create the job
+response = s3control.create_job(
+    AccountId='${env.ACCOUNT_NUMBER}',
+    Operation=operation,
+    ManifestGenerator=manifest_generator,
+    Report=report,
+    Priority=${params.PRIORITY},
+    RoleArn='${role3Arn}',
+    ConfirmationRequired=False
+)
+
+# Output the job ID as JSON
+print(json.dumps({'JobId': response['JobId']}))
+"""
+                            
+                            writeFile file: 'create_job.py', text: pythonScript
+                            
                             def jobOutput = ''
                             retry(3) {
                                 jobOutput = sh(
                                     script: """
-                                        aws s3control create-job \
-                                            --account-id ${env.ACCOUNT_NUMBER} \
-                                            --operation "\$(jq -c . ${workspacePath}/operation.json)" \
-                                            --manifest-generator "\$(jq -c . ${workspacePath}/manifest-generator.json)" \
-                                            --manifest '{}' \
-                                            --report "\$(jq -c . ${workspacePath}/report.json)" \
-                                            --priority ${params.PRIORITY} \
-                                            --role-arn ${role3Arn} \
-                                            --region ${params.REGION} \
-                                            --no-confirmation-required \
-                                            --output json
+                                        python3 create_job.py
                                     """,
                                     returnStdout: true
                                 ).trim()
