@@ -433,15 +433,17 @@ pipeline {
                                 python3 -m json.tool report.json > /dev/null && echo "Report JSON is valid" || (echo "Invalid JSON!" && exit 1)
                             """
                             
+                            // Use shell command substitution to read JSON files inline
+                            // This avoids file:// path issues and shell escaping problems
                             def jobOutput = ''
                             retry(3) {
                                 jobOutput = sh(
                                     script: """
                                         aws s3control create-job \
                                             --account-id ${env.ACCOUNT_NUMBER} \
-                                            --operation file://${workspacePath}/operation.json \
-                                            --manifest-generator file://${workspacePath}/manifest-generator.json \
-                                            --report file://${workspacePath}/report.json \
+                                            --operation "\$(cat ${workspacePath}/operation.json)" \
+                                            --manifest-generator "\$(cat ${workspacePath}/manifest-generator.json)" \
+                                            --report "\$(cat ${workspacePath}/report.json)" \
                                             --priority ${params.PRIORITY} \
                                             --role-arn ${role3Arn} \
                                             --region ${params.REGION} \
