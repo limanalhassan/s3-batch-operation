@@ -165,8 +165,20 @@ pipeline {
                             
                             // Set lifecycle configuration (whether bucket was just created or already existed)
                             echo "Setting lifecycle configuration..."
-                            def lifecycleConfig = '{"Rules":[{"ID":"DeleteAfter7Days","Status":"Enabled","Expiration":{"Days":7}}]}'
+                            def lifecycleConfig = '''{
+  "Rules": [
+    {
+      "ID": "DeleteAfter7Days",
+      "Status": "Enabled",
+      "Filter": {},
+      "Expiration": {
+        "Days": 7
+      }
+    }
+  ]
+}'''
                             writeFile file: '/tmp/report-lifecycle.json', text: lifecycleConfig
+                            sh "cat /tmp/report-lifecycle.json"
                             retry(3) {
                                 sh """
                                     aws s3api put-bucket-lifecycle-configuration \
@@ -210,8 +222,20 @@ pipeline {
                             
                             // Set lifecycle configuration (whether bucket was just created or already existed)
                             echo "Setting lifecycle configuration..."
-                            def lifecycleConfig = '{"Rules":[{"ID":"DeleteAfter7Days","Status":"Enabled","Expiration":{"Days":7}}]}'
+                            def lifecycleConfig = '''{
+  "Rules": [
+    {
+      "ID": "DeleteAfter7Days",
+      "Status": "Enabled",
+      "Filter": {},
+      "Expiration": {
+        "Days": 7
+      }
+    }
+  ]
+}'''
                             writeFile file: '/tmp/manifest-lifecycle.json', text: lifecycleConfig
+                            sh "cat /tmp/manifest-lifecycle.json"
                             retry(3) {
                                 sh """
                                     aws s3api put-bucket-lifecycle-configuration \
