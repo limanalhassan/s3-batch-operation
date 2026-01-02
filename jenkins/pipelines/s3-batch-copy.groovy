@@ -416,95 +416,39 @@ pipeline {
                                 ReportScope: "AllTasks"
                             ]
                             
-                            // Convert to JSON (compact format, single line to avoid shell parsing issues)
+                            // Build complete CLI input JSON for AWS CLI
                             def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
-                            def operationJson = groovy.json.JsonOutput.toJson(operationMap)
-                            def manifestGeneratorJson = groovy.json.JsonOutput.toJson(manifestGeneratorMap)
-                            def reportJson = groovy.json.JsonOutput.toJson(reportMap)
+                            def cliInputJson = [
+                                AccountId: env.ACCOUNT_NUMBER,
+                                Operation: operationMap,
+                                ManifestGenerator: manifestGeneratorMap.S3JobManifestGenerator,
+                                Report: reportMap,
+                                Priority: params.PRIORITY.toInteger(),
+                                RoleArn: role3Arn,
+                                ConfirmationRequired: false
+                            ]
                             
-                            // Write compact JSON (single line) for shell command substitution
-                            writeFile file: 'operation.json', text: operationJson
-                            writeFile file: 'manifest-generator.json', text: manifestGeneratorJson
-                            writeFile file: 'report.json', text: reportJson
-                            
-                            // Show the JSON for debugging (pretty print for readability)
-                            echo "=== Operation JSON ==="
-                            sh "cat operation.json | jq ."
-                            echo "=== Manifest Generator JSON ==="
-                            sh "cat manifest-generator.json | jq ."
-                            echo "=== Report JSON ==="
-                            sh "cat report.json | jq ."
+                            // Convert to JSON and write to file
+                            def cliInputJsonString = groovy.json.JsonOutput.toJson(cliInputJson)
+                            writeFile file: 'cli-input.json', text: groovy.json.JsonOutput.prettyPrint(cliInputJsonString)
                             
                             // Validate JSON
                             sh """
-                                python3 -m json.tool operation.json > /dev/null && echo "Operation JSON is valid" || (echo "Invalid JSON!" && exit 1)
-                                python3 -m json.tool manifest-generator.json > /dev/null && echo "Manifest generator JSON is valid" || (echo "Invalid JSON!" && exit 1)
-                                python3 -m json.tool report.json > /dev/null && echo "Report JSON is valid" || (echo "Invalid JSON!" && exit 1)
+                                echo "=== CLI Input JSON ==="
+                                cat cli-input.json | jq .
+                                echo "=== Validating JSON ==="
+                                jq . cli-input.json > /dev/null && echo "JSON is valid" || (echo "Invalid JSON!" && exit 1)
                             """
                             
-                            // Install boto3 if not already installed
-                            echo "Checking for boto3..."
-                            def boto3Installed = sh(
-                                script: "python3 -c 'import boto3' 2>&1",
-                                returnStatus: true
-                            )
-                            
-                            if (boto3Installed != 0) {
-                                echo "boto3 not found. Installing..."
-                                sh """
-                                    python3 -m pip install --user boto3 || pip3 install --user boto3 || (echo "Failed to install boto3" && exit 1)
-                                """
-                                // Verify installation
-                                sh """
-                                    python3 -c "import boto3; print('boto3 installed successfully, version:', boto3.__version__)" || (echo "Failed to import boto3 after installation" && exit 1)
-                                """
-                            } else {
-                                echo "boto3 is already installed"
-                                sh "python3 -c 'import boto3; print(\"boto3 version:\", boto3.__version__)'"
-                            }
-                            
-                            // Use Python with boto3 to create the job (more reliable than AWS CLI)
-                            // This avoids AWS CLI version compatibility issues with --manifest-generator
-                            def pythonScript = """
-import json
-import boto3
-import sys
-
-# Read JSON files
-with open('${workspacePath}/operation.json', 'r') as f:
-    operation = json.load(f)
-
-with open('${workspacePath}/manifest-generator.json', 'r') as f:
-    manifest_generator = json.load(f)
-
-with open('${workspacePath}/report.json', 'r') as f:
-    report = json.load(f)
-
-# Create S3 Control client
-s3control = boto3.client('s3control', region_name='${params.REGION}')
-
-# Create the job
-response = s3control.create_job(
-    AccountId='${env.ACCOUNT_NUMBER}',
-    Operation=operation,
-    ManifestGenerator=manifest_generator,
-    Report=report,
-    Priority=${params.PRIORITY},
-    RoleArn='${role3Arn}',
-    ConfirmationRequired=False
-)
-
-# Output the job ID as JSON
-print(json.dumps({'JobId': response['JobId']}))
-"""
-                            
-                            writeFile file: 'create_job.py', text: pythonScript
-                            
+                            // Use AWS CLI with --cli-input-json (works with AWS CLI v1)
                             def jobOutput = ''
                             retry(3) {
                                 jobOutput = sh(
                                     script: """
-                                        python3 create_job.py
+                                        aws s3control create-job \
+                                            --cli-input-json file://${workspacePath}/cli-input.json \
+                                            --region ${params.REGION} \
+                                            --output json
                                     """,
                                     returnStdout: true
                                 ).trim()
