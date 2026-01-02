@@ -51,6 +51,9 @@ pipeline {
                     
                     echo "Account Name: ${params.ACCOUNT_NAME}"
                     echo "Account Number: ${env.ACCOUNT_NUMBER}"
+                    echo "Resource Prefix: ${params.RESOURCE_PREFIX}"
+                    echo "Name Prefix: ${env.NAME_PREFIX}"
+                    echo "Role Name: ${env.S3_BATCH_INFRA_ROLE_NAME}"
                     echo "Attempting to assume role: ${env.S3_BATCH_INFRA_ROLE_ARN}"
                 }
             }
