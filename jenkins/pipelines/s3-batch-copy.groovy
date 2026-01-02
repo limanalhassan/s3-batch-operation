@@ -486,37 +486,85 @@ pipeline {
                             sh "cat manifest-generator.json | jq ."
                             
                             // Use AWS CLI v2 with individual file parameters (most reliable approach)
-                            // Note: S3JobManifestGenerator generates manifest from bucket objects
-                            // However, some AWS documentation suggests it may require an S3 Inventory to be configured first
+                            // CRITICAL: S3JobManifestGenerator REQUIRES an S3 Inventory to be configured on the source bucket
+                            // Check and configure S3 Inventory if missing
+                            echo "Checking S3 Inventory configuration for source bucket: ${env.SOURCE_BUCKET}"
+                            def inventoryId = "s3-batch-manifest-inventory"
+                            def inventoryCheck = sh(
+                                script: """
+                                    ${awsCmd} s3api get-bucket-inventory-configuration \
+                                        --bucket ${env.SOURCE_BUCKET} \
+                                        --id ${inventoryId} \
+                                        --region ${params.REGION} \
+                                        --output json 2>&1 || echo 'NOT_CONFIGURED'
+                                """,
+                                returnStdout: true
+                            ).trim()
                             
-                            // Try to verify source bucket has objects (non-blocking)
-                            echo "Verifying source bucket has objects..."
-                            try {
-                                def listOutput = sh(
-                                    script: """
-                                        ${awsCmd} s3api list-objects-v2 \
-                                            --bucket ${env.SOURCE_BUCKET} \
-                                            --max-items 1 \
-                                            --region ${params.REGION} \
-                                            --output json 2>&1
-                                    """,
-                                    returnStdout: true
-                                ).trim()
+                            if (inventoryCheck.contains('NOT_CONFIGURED') || inventoryCheck.contains('NoSuchConfiguration')) {
+                                echo "S3 Inventory not configured. Configuring now..."
                                 
-                                if (listOutput && !listOutput.contains('An error occurred')) {
-                                    def objectCount = sh(
-                                        script: "echo '${listOutput}' | jq -r '.KeyCount // 0'",
+                                // Create inventory configuration JSON
+                                def inventoryConfig = [
+                                    Id: inventoryId,
+                                    IsEnabled: true,
+                                    IncludedObjectVersions: "All",
+                                    Schedule: [
+                                        Frequency: "Daily"
+                                    ],
+                                    Destination: [
+                                        S3BucketDestination: [
+                                            AccountId: env.ACCOUNT_NUMBER,
+                                            Bucket: "arn:aws:s3:::${env.MANIFEST_BUCKET}",
+                                            Format: "CSV",
+                                            Prefix: "inventory-output/"
+                                        ]
+                                    ],
+                                    OptionalFields: [
+                                        "Size",
+                                        "LastModifiedDate",
+                                        "ETag",
+                                        "StorageClass",
+                                        "IsMultipartUploaded",
+                                        "ReplicationStatus",
+                                        "EncryptionStatus"
+                                    ]
+                                ]
+                                
+                                def inventoryConfigJson = groovy.json.JsonOutput.toJson(inventoryConfig)
+                                writeFile file: 'inventory-config.json', text: inventoryConfigJson
+                                
+                                echo "=== Inventory Configuration JSON ==="
+                                sh "cat inventory-config.json | jq ."
+                                
+                                // Configure inventory
+                                sh """
+                                    ${awsCmd} s3api put-bucket-inventory-configuration \
+                                        --bucket ${env.SOURCE_BUCKET} \
+                                        --id ${inventoryId} \
+                                        --inventory-configuration file://${workspacePath}/inventory-config.json \
+                                        --region ${params.REGION}
+                                """
+                                
+                                echo "S3 Inventory configured successfully!"
+                                echo "WARNING: The first inventory report may take up to 24 hours to generate."
+                                echo "The batch job creation may still fail until the first report is available."
+                                echo "Consider waiting for the first inventory report before running this pipeline again."
+                                
+                                // Don't fail the pipeline, but warn the user
+                                echo "ATTENTION: S3 Inventory was just configured. You may need to wait for the first report before the batch job can be created."
+                            } else {
+                                echo "S3 Inventory is already configured for ${env.SOURCE_BUCKET}"
+                                // Show inventory details
+                                try {
+                                    def inventoryDetails = sh(
+                                        script: "echo '${inventoryCheck}' | jq -r '{Id: .Id, IsEnabled: .IsEnabled, Schedule: .Schedule.Frequency}'",
                                         returnStdout: true
                                     ).trim()
-                                    echo "Source bucket object count (first page): ${objectCount}"
-                                    if (objectCount.toInteger() == 0) {
-                                        echo "WARNING: Source bucket appears empty. S3JobManifestGenerator may fail."
-                                    }
-                                } else {
-                                    echo "Warning: Could not verify source bucket objects. Continuing..."
+                                    echo "Inventory details: ${inventoryDetails}"
+                                } catch (Exception e) {
+                                    echo "Could not parse inventory details, but inventory exists"
                                 }
-                            } catch (Exception e) {
-                                echo "Warning: Source bucket validation failed: ${e.getMessage()}. Continuing..."
                             }
                             
                             def jobOutput = ''

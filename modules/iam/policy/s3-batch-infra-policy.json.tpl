@@ -34,7 +34,9 @@
         "s3:PutBucketLifecycleConfiguration",
         "s3:PutLifecycleConfiguration",
         "s3:GetBucketLocation",
-        "s3:GetBucketVersioning"
+        "s3:GetBucketVersioning",
+        "s3:PutInventoryConfiguration",
+        "s3:GetInventoryConfiguration"
       ],
       "Resource": "*"
     },
