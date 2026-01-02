@@ -72,11 +72,10 @@ pipeline {
                     
                     echo "Instance profile available: ${metadataCheck}"
                     
-                    try {
-                        withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy', region: params.REGION) {
-                            echo "Successfully assumed role. Testing AWS credentials..."
-                            sh "aws sts get-caller-identity"
-                            retry(3) {
+                    withAWS(role: env.S3_BATCH_INFRA_ROLE_ARN, roleSessionName: 'jenkins-s3-batch-copy', region: params.REGION) {
+                        echo "Successfully assumed role. Testing AWS credentials..."
+                        sh "aws sts get-caller-identity"
+                        retry(3) {
                             def bucketsJson = sh(
                                 script: "aws s3api list-buckets --output json --region ${params.REGION}",
                                 returnStdout: true
