@@ -524,7 +524,8 @@ pipeline {
                                     returnStdout: true
                                 ).trim()
                                 
-                                def isTruncated = (isTruncatedStr == 'true')
+                                def isTruncated = (isTruncatedStr == 'true' || isTruncatedStr == 'True')
+                                echo "Page ${pageCount}: IsTruncated = ${isTruncatedStr} (parsed as: ${isTruncated})"
                                 
                                 // Get continuation token if available
                                 def continuationTokenStr = sh(
@@ -534,18 +535,25 @@ pipeline {
                                 
                                 continuationToken = (continuationTokenStr && continuationTokenStr != 'null' && continuationTokenStr != '') ? continuationTokenStr : ""
                                 
+                                if (continuationToken) {
+                                    echo "Page ${pageCount}: NextContinuationToken found (length: ${continuationToken.length()})"
+                                } else {
+                                    echo "Page ${pageCount}: No NextContinuationToken"
+                                }
+                                
                                 // Break if not truncated (no more results)
                                 if (!isTruncated) {
-                                    echo "IsTruncated: false. Finished pagination."
+                                    echo "IsTruncated: false. Finished pagination after ${pageCount} pages."
                                     break
                                 }
                                 
                                 // If truncated but no token, that's an error condition
                                 if (isTruncated && !continuationToken) {
-                                    echo "WARNING: IsTruncated is true but no NextContinuationToken found. This may indicate an issue."
-                                    echo "Attempting to continue without token (may fail)..."
-                                    // Try to continue anyway - AWS might still work
+                                    error("ERROR: IsTruncated is true but no NextContinuationToken found. Cannot continue pagination.")
                                 }
+                                
+                                // Continue to next page
+                                echo "Continuing to next page (IsTruncated: true)..."
                             }
                             
                             // Verify final count from merged file
