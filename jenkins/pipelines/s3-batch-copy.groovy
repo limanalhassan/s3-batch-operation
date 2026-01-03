@@ -340,13 +340,8 @@ pipeline {
                             def jsonPolicy = groovy.json.JsonOutput.toJson(executionPolicy)
                             writeFile file: 'batch-job-execution-policy.json', text: groovy.json.JsonOutput.prettyPrint(jsonPolicy)
                             
-                            // Validate and show JSON
-                            sh """
-                                echo "=== Policy JSON ==="
-                                cat batch-job-execution-policy.json
-                                echo "=== Validating JSON ==="
-                                python3 -m json.tool batch-job-execution-policy.json > /dev/null && echo "JSON is valid" || (echo "Invalid JSON!" && exit 1)
-                            """
+                            // Validate JSON
+                            sh "python3 -m json.tool batch-job-execution-policy.json > /dev/null || (echo 'Invalid JSON!' && exit 1)"
                             
                             echo "Attaching execution policy to role: ${env.BATCH_JOB_ROLE_NAME}"
                             retry(3) {
@@ -667,67 +662,32 @@ pipeline {
                                 
                                 // Check exit code
                                 if (exitCode != 0) {
-                                    echo "=== ERROR: Command failed with exit code ${exitCode} ==="
-                                    echo "=== Validating JSON files ==="
-                                    sh "echo '=== Operation JSON ===' && jq . ${workspacePath}/operation.json"
-                                    sh "echo '=== Manifest Spec JSON ===' && jq . ${workspacePath}/manifest.json"
-                                    sh "echo '=== Report JSON ===' && jq . ${workspacePath}/report.json"
+                                    echo "ERROR: Command failed with exit code ${exitCode}"
                                     
-                                    // Try to extract more detailed error message
+                                    // Try to extract detailed error message
                                     if (jobOutput.contains('An error occurred')) {
                                         def errorMatch = jobOutput =~ /An error occurred \\((.*?)\\) when calling the CreateJob operation: (.*)/
                                         if (errorMatch) {
-                                            echo "=== DETAILED ERROR ==="
                                             echo "Error Type: ${errorMatch[0][1]}"
                                             echo "Error Message: ${errorMatch[0][2]}"
+                                        } else {
+                                            echo "Output: ${jobOutput}"
                                         }
+                                    } else {
+                                        echo "Output: ${jobOutput}"
                                     }
                                     
-                                    // Run with --debug to get request details
-                                    echo "=== Running with --debug to capture request details ==="
-                                    // Save full debug output to file first
-                                    sh """
-                                        ${awsCmd} s3control create-job \\
-                                            --account-id ${env.ACCOUNT_NUMBER} \\
-                                            --operation file://${workspacePath}/operation.json \\
-                                            --manifest file://${workspacePath}/manifest.json \\
-                                            --report file://${workspacePath}/report.json \\
-                                            --priority ${params.PRIORITY} \\
-                                            --role-arn ${role3Arn} \\
-                                            --region ${params.REGION} \\
-                                            --no-confirmation-required \\
-                                            --output json \\
-                                            --debug 2>&1 | tee ${workspacePath}/aws-debug-full.log || true
-                                    """
-                                    
-                                    // Extract request body from debug log
-                                    echo "=== REQUEST BODY (from debug log) ==="
-                                    sh """
-                                        grep -A 200 "Request body:" ${workspacePath}/aws-debug-full.log | head -300 || \\
-                                        grep -B 50 -A 50 "body:" ${workspacePath}/aws-debug-full.log | grep -A 200 "body:" | head -300 || \\
-                                        echo "Could not find request body in debug log"
-                                    """
-                                    
-                                    // Show response body
-                                    echo "=== RESPONSE BODY (from debug log) ==="
-                                    sh """
-                                        grep -A 10 "Response body:" ${workspacePath}/aws-debug-full.log | head -20 || true
-                                    """
-                                    
-                                    error("AWS CLI command failed with exit code ${exitCode}. Output: ${jobOutput}")
+                                    error("Failed to create S3 Batch Operations job")
                                 }
                                 
                                 // Check if output contains error message (even if exit code was 0)
                                 if (jobOutput.contains('An error occurred') || jobOutput.contains('InvalidRequest') || jobOutput.contains('Request invalid')) {
-                                    echo "=== ERROR DETECTED IN OUTPUT ==="
-                                    echo "Full output: ${jobOutput}"
                                     error("AWS CLI returned error: ${jobOutput}")
                                 }
                                 
                                 // Verify we got valid JSON with JobId
                                 if (!jobOutput.contains('JobId')) {
-                                    echo "Warning: Response doesn't contain JobId. Output: ${jobOutput}"
-                                    error("Unexpected response format: ${jobOutput}")
+                                    error("Unexpected response format. Expected JobId but got: ${jobOutput}")
                                 }
                             }
                             
