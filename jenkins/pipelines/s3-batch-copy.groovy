@@ -494,12 +494,26 @@ pipeline {
                                     error("Failed to list objects from bucket ${env.SOURCE_BUCKET}. Output: ${listOutput}")
                                 }
                                 
-                                // Debug: Show key fields from response
+                                // Debug: Show actual response structure
                                 def responseDebug = sh(
-                                    script: "jq '{IsTruncated, KeyCount, MaxKeys, NextContinuationToken: (.NextContinuationToken != null)}' ${listJsonFile}",
+                                    script: "jq '{IsTruncated, KeyCount, MaxKeys, NextContinuationToken: (.NextContinuationToken != null), ContentsCount: (.Contents | length)}' ${listJsonFile}",
                                     returnStdout: true
                                 ).trim()
                                 echo "Page ${pageCount} Response Debug: ${responseDebug}"
+                                
+                                // Also check raw response for IsTruncated (might be boolean, not string)
+                                def rawIsTruncated = sh(
+                                    script: "jq '.IsTruncated' ${listJsonFile}",
+                                    returnStdout: true
+                                ).trim()
+                                echo "Page ${pageCount} Raw IsTruncated value: ${rawIsTruncated} (type check)"
+                                
+                                // Check if response has the field at all
+                                def hasIsTruncated = sh(
+                                    script: "jq 'has(\"IsTruncated\")' ${listJsonFile}",
+                                    returnStdout: true
+                                ).trim()
+                                echo "Page ${pageCount} Has IsTruncated field: ${hasIsTruncated}"
                                 
                                 // Merge Contents into combined file
                                 def pageObjectsStr = sh(
