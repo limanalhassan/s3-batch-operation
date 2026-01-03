@@ -624,15 +624,7 @@ pipeline {
                             writeFile file: 'operation.json', text: operationJson
                             writeFile file: 'report.json', text: reportJson
                             
-                            // Show JSON for debugging
-                            echo "=== Operation JSON ==="
-                            sh "cat operation.json | jq ."
-                            echo "=== Report JSON ==="
-                            sh "cat report.json | jq ."
-                            echo "=== Manifest Spec JSON ==="
-                            sh "cat manifest.json | jq ."
-                            echo "=== Manifest file preview (first 10 lines) ==="
-                            sh "head -10 ${manifestLocalPath}"
+                            echo "Manifest file contains ${finalCount} objects"
                             
                             def jobOutput = ''
                             retry(3) {
