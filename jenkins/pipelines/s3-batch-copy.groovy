@@ -518,7 +518,15 @@ pipeline {
                                     echo "Page ${pageCount}: Found ${pageObjects} objects (total so far: ${totalObjects})"
                                 }
                                 
-                                // Check for continuation token
+                                // Check if there are more results (IsTruncated field)
+                                def isTruncatedStr = sh(
+                                    script: "jq -r '.IsTruncated // false' ${listJsonFile}",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                def isTruncated = (isTruncatedStr == 'true')
+                                
+                                // Get continuation token if available
                                 def continuationTokenStr = sh(
                                     script: "jq -r '.NextContinuationToken // empty' ${listJsonFile}",
                                     returnStdout: true
@@ -526,9 +534,17 @@ pipeline {
                                 
                                 continuationToken = (continuationTokenStr && continuationTokenStr != 'null' && continuationTokenStr != '') ? continuationTokenStr : ""
                                 
-                                if (!continuationToken) {
-                                    echo "No continuation token found. Finished pagination."
+                                // Break if not truncated (no more results)
+                                if (!isTruncated) {
+                                    echo "IsTruncated: false. Finished pagination."
                                     break
+                                }
+                                
+                                // If truncated but no token, that's an error condition
+                                if (isTruncated && !continuationToken) {
+                                    echo "WARNING: IsTruncated is true but no NextContinuationToken found. This may indicate an issue."
+                                    echo "Attempting to continue without token (may fail)..."
+                                    // Try to continue anyway - AWS might still work
                                 }
                             }
                             
