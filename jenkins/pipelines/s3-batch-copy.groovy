@@ -415,8 +415,7 @@ pipeline {
                             
                             // Build JSON using Groovy maps for proper formatting
                             // Note: TargetResource must be bucket ARN only (no path/prefix)
-                            // S3PutObjectCopy copies objects with their original keys
-                            // To copy to a prefix, we would need to use S3ReplicateObject or handle key transformation
+                            // Use TargetKeyPrefix to add a prefix to destination objects
                             def operationMap = [
                                 S3PutObjectCopy: [
                                     TargetResource: "arn:aws:s3:::${env.DEST_BUCKET}",
@@ -425,11 +424,10 @@ pipeline {
                                 ]
                             ]
                             
-                            // Note: DEST_PREFIX is not directly supported by S3PutObjectCopy
-                            // Objects will be copied with their original keys to the destination bucket
-                            // If prefix transformation is needed, consider using S3ReplicateObject or Lambda
-                            if (params.DEST_PREFIX) {
-                                echo "WARNING: DEST_PREFIX (${params.DEST_PREFIX}) is provided but S3PutObjectCopy does not support prefix transformation. Objects will be copied with original keys."
+                            // Add TargetKeyPrefix if DEST_PREFIX is provided
+                            if (params.DEST_PREFIX && params.DEST_PREFIX.trim()) {
+                                operationMap.S3PutObjectCopy.TargetKeyPrefix = params.DEST_PREFIX.trim()
+                                echo "Objects will be copied to destination prefix: ${params.DEST_PREFIX}"
                             }
                             
                             def reportMap = [
@@ -459,58 +457,93 @@ pipeline {
                             def listPrefix = params.SOURCE_PREFIX ?: ""
                             echo "Listing objects with prefix: '${listPrefix}'"
                             
-                            // List objects and write to temporary JSON file for safer processing
+                            // List ALL objects with pagination to avoid duplicates
+                            // Use a temporary file to accumulate all objects across pages
+                            def allObjectsFile = "${workspacePath}/all-objects-${System.currentTimeMillis()}.json"
                             def listJsonFile = "${workspacePath}/list-objects-${System.currentTimeMillis()}.json"
                             
+                            // Initialize combined results
                             sh """
-                                ${awsCmd} s3api list-objects-v2 \
-                                    --bucket ${env.SOURCE_BUCKET} \
-                                    --prefix "${listPrefix}" \
-                                    --region ${params.REGION} \
-                                    --output json > ${listJsonFile} 2>&1 || {
-                                    echo "Failed to list objects"
-                                    cat ${listJsonFile}
-                                    exit 1
-                                }
+                                echo '{"Contents":[]}' > ${allObjectsFile}
                             """
                             
-                            // Check if command failed (stderr output or error in JSON)
-                            def listOutput = readFile(listJsonFile)
-                            if (listOutput.contains('An error occurred') || listOutput.contains('AccessDenied') || listOutput.contains('NoSuchBucket')) {
-                                error("Failed to list objects from bucket ${env.SOURCE_BUCKET}. Output: ${listOutput}")
+                            def continuationToken = ""
+                            def pageCount = 0
+                            def totalObjects = 0
+                            
+                            // Paginate through all objects
+                            while (true) {
+                                pageCount++
+                                def listCmd = """
+                                    ${awsCmd} s3api list-objects-v2 \
+                                        --bucket ${env.SOURCE_BUCKET} \
+                                        --prefix "${listPrefix}" \
+                                        --region ${params.REGION} \
+                                        --max-items 1000 \
+                                        --output json
+                                """
+                                
+                                if (continuationToken) {
+                                    listCmd += " --continuation-token '${continuationToken}'"
+                                }
+                                
+                                sh """
+                                    ${listCmd} > ${listJsonFile} 2>&1 || {
+                                        echo "Failed to list objects (page ${pageCount})"
+                                        cat ${listJsonFile}
+                                        exit 1
+                                    }
+                                """
+                                
+                                // Check for errors
+                                def listOutput = readFile(listJsonFile)
+                                if (listOutput.contains('An error occurred') || listOutput.contains('AccessDenied') || listOutput.contains('NoSuchBucket')) {
+                                    error("Failed to list objects from bucket ${env.SOURCE_BUCKET}. Output: ${listOutput}")
+                                }
+                                
+                                // Merge Contents into combined file
+                                def pageObjects = sh(
+                                    script: "jq -r '.Contents // [] | length' ${listJsonFile}",
+                                    returnStdout: true
+                                ).trim().toInteger()
+                                
+                                if (pageObjects > 0) {
+                                    sh """
+                                        jq -s '[.[0].Contents + .[1].Contents] | {Contents: .[0]}' ${allObjectsFile} ${listJsonFile} > ${allObjectsFile}.tmp && mv ${allObjectsFile}.tmp ${allObjectsFile}
+                                    """
+                                    totalObjects += pageObjects
+                                    echo "Page ${pageCount}: Found ${pageObjects} objects (total so far: ${totalObjects})"
+                                }
+                                
+                                // Check for continuation token
+                                continuationToken = sh(
+                                    script: "jq -r '.NextContinuationToken // empty' ${listJsonFile}",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (!continuationToken || continuationToken == 'null' || continuationToken == '') {
+                                    break
+                                }
                             }
                             
-                            // Count objects (handle case where Contents might be null or missing)
-                            def objectCount = sh(
-                                script: "jq -r 'if .Contents then (.Contents | length) else 0 end' ${listJsonFile}",
-                                returnStdout: true
-                            ).trim()
+                            echo "Found ${totalObjects} total objects in bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}' (across ${pageCount} pages)"
                             
-                            if (!objectCount || objectCount == 'null' || objectCount == '') {
-                                objectCount = '0'
-                            }
-                            
-                            def objectCountInt = objectCount.toInteger()
-                            echo "Found ${objectCountInt} objects in bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}'"
-                            
-                            if (objectCountInt == 0) {
+                            if (totalObjects == 0) {
                                 error("No objects found in source bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}'. Cannot create batch job with empty manifest.")
                             }
                             
-                            // Generate manifest CSV with proper quoting
-                            // Use jq with --arg to pass bucket name safely and avoid shell escaping issues
-                            // Escape backslashes properly for Groovy triple-quoted strings
+                            // Generate manifest CSV with proper quoting from combined results
                             sh """
-                                jq -r --arg bucket '${env.SOURCE_BUCKET}' '.Contents[]? | "\\"" + \$bucket + "\\",\\"" + (.Key | gsub("\\""; "\\"\\"")) + "\\""' ${listJsonFile} > ${manifestLocalPath} || {
+                                jq -r --arg bucket '${env.SOURCE_BUCKET}' '.Contents[]? | "\\"" + \$bucket + "\\",\\"" + (.Key | gsub("\\""; "\\"\\"")) + "\\""' ${allObjectsFile} > ${manifestLocalPath} || {
                                     echo "jq command failed with exit code: \$?"
                                     echo "JSON file contents:"
-                                    head -20 ${listJsonFile}
+                                    head -20 ${allObjectsFile}
                                     exit 1
                                 }
                             """
                             
-                            // Clean up temporary file
-                            sh "rm -f ${listJsonFile}"
+                            // Clean up temporary files
+                            sh "rm -f ${listJsonFile} ${allObjectsFile}"
                             
                             // Verify manifest was created correctly
                             def manifestLineCount = sh(
@@ -518,11 +551,11 @@ pipeline {
                                 returnStdout: true
                             ).trim().toInteger()
                             
-                            echo "Manifest contains ${manifestLineCount} lines (expected ${objectCountInt} objects)"
+                            echo "Manifest contains ${manifestLineCount} lines (expected ${totalObjects} objects)"
                             
                             // Warn if counts don't match, but don't fail (manifest generation should be correct)
-                            if (manifestLineCount != objectCountInt) {
-                                echo "WARNING: Manifest line count (${manifestLineCount}) does not exactly match object count (${objectCountInt}), but proceeding..."
+                            if (manifestLineCount != totalObjects) {
+                                echo "WARNING: Manifest line count (${manifestLineCount}) does not exactly match object count (${totalObjects}), but proceeding..."
                             }
                             
                             // Upload manifest to S3
