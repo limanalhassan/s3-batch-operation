@@ -72,6 +72,11 @@
     },
     {
       "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::*:role/${name_prefix}-batch-job-role*"
+    },
+    {
+      "Effect": "Allow",
       "Action": [
         "s3control:CreateJob",
         "s3:CreateJob"
