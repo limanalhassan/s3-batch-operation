@@ -474,14 +474,12 @@ pipeline {
                             // Paginate through all objects
                             while (true) {
                                 pageCount++
-                                def listCmd = """
-                                    ${awsCmd} s3api list-objects-v2 \
-                                        --bucket ${env.SOURCE_BUCKET} \
-                                        --prefix "${listPrefix}" \
-                                        --region ${params.REGION} \
-                                        --max-items 1000 \
-                                        --output json
-                                """
+                                def listCmd = "${awsCmd} s3api list-objects-v2 --bucket ${env.SOURCE_BUCKET} --region ${params.REGION} --max-items 1000 --output json"
+                                
+                                // Only add --prefix if it's not empty
+                                if (listPrefix && listPrefix.trim()) {
+                                    listCmd += " --prefix \"${listPrefix}\""
+                                }
                                 
                                 if (continuationToken) {
                                     listCmd += " --continuation-token '${continuationToken}'"
@@ -539,10 +537,26 @@ pipeline {
                                 }
                             }
                             
-                            echo "Found ${totalObjects} total objects in bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}' (across ${pageCount} pages)"
+                            // Verify final count from merged file
+                            def finalCountStr = sh(
+                                script: "jq -r '.Contents // [] | length' ${allObjectsFile}",
+                                returnStdout: true
+                            ).trim()
                             
-                            if (totalObjects == 0) {
-                                error("No objects found in source bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}'. Cannot create batch job with empty manifest.")
+                            def finalCount = 0
+                            if (finalCountStr && finalCountStr != 'null' && finalCountStr != '') {
+                                try {
+                                    finalCount = finalCountStr.toInteger()
+                                } catch (NumberFormatException e) {
+                                    echo "WARNING: Could not parse final object count '${finalCountStr}', using running total ${totalObjects}"
+                                    finalCount = totalObjects
+                                }
+                            }
+                            
+                            echo "Found ${finalCount} total objects in bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix ?: '(root)'}' (across ${pageCount} pages, running total was ${totalObjects})"
+                            
+                            if (finalCount == 0) {
+                                error("No objects found in source bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix ?: '(root)'}'. Cannot create batch job with empty manifest.")
                             }
                             
                             // Generate manifest CSV with proper quoting from combined results
@@ -564,11 +578,11 @@ pipeline {
                                 returnStdout: true
                             ).trim().toInteger()
                             
-                            echo "Manifest contains ${manifestLineCount} lines (expected ${totalObjects} objects)"
+                            echo "Manifest contains ${manifestLineCount} lines (expected ${finalCount} objects)"
                             
                             // Warn if counts don't match, but don't fail (manifest generation should be correct)
-                            if (manifestLineCount != totalObjects) {
-                                echo "WARNING: Manifest line count (${manifestLineCount}) does not exactly match object count (${totalObjects}), but proceeding..."
+                            if (manifestLineCount != finalCount) {
+                                echo "WARNING: Manifest line count (${manifestLineCount}) does not exactly match object count (${finalCount}), but proceeding..."
                             }
                             
                             // Upload manifest to S3
