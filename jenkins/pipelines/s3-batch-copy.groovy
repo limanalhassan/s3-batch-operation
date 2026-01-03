@@ -433,7 +433,7 @@ pipeline {
                             }
                             
                             def reportMap = [
-                                Bucket: env.REPORT_BUCKET,  // Bucket name (not ARN)
+                                Bucket: "arn:aws:s3:::${env.REPORT_BUCKET}",  // Bucket ARN (required by AWS)
                                 Prefix: "reports/",
                                 Format: "Report_CSV_20180820",
                                 Enabled: true,
@@ -448,9 +448,10 @@ pipeline {
                             def manifestLocalPath = "${workspacePath}/${manifestFileName}"
                             
                             // Create manifest CSV file (format: Bucket,Key)
-                            // Header is optional but recommended
+                            // AWS S3 Batch Operations does NOT want a header row
+                            // Start with empty file
                             sh """
-                                echo "Bucket,Key" > ${manifestLocalPath}
+                                touch ${manifestLocalPath}
                             """
                             
                             // List objects and append to manifest
@@ -472,11 +473,11 @@ pipeline {
                                 returnStdout: true
                             ).trim().toInteger()
                             
-                            if (manifestLineCount <= 1) {
+                            if (manifestLineCount <= 0) {
                                 error("No objects found in source bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}'. Cannot create batch job with empty manifest.")
                             }
                             
-                            echo "Manifest contains ${manifestLineCount - 1} objects (excluding header)"
+                            echo "Manifest contains ${manifestLineCount} objects"
                             
                             // Upload manifest to S3
                             def manifestS3Key = "manifests/${manifestFileName}"
