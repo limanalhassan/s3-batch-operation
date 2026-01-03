@@ -518,8 +518,12 @@ pipeline {
                                 returnStdout: true
                             ).trim().toInteger()
                             
-                            if (manifestLineCount != objectCount) {
-                                error("Manifest line count (${manifestLineCount}) does not match object count (${objectCount})")
+                            echo "Debug: manifestLineCount=${manifestLineCount} (type: ${manifestLineCount.getClass().getName()})"
+                            echo "Debug: objectCountInt=${objectCountInt} (type: ${objectCountInt.getClass().getName()})"
+                            echo "Debug: comparison result: ${manifestLineCount != objectCountInt}"
+                            
+                            if (manifestLineCount != objectCountInt) {
+                                error("Manifest line count (${manifestLineCount}) does not match object count (${objectCountInt})")
                             }
                             
                             echo "Manifest contains ${manifestLineCount} objects"
