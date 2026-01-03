@@ -455,6 +455,7 @@ pipeline {
                             """
                             
                             // List objects and append to manifest
+                            // Properly quote CSV fields to handle commas in keys
                             def listPrefix = params.SOURCE_PREFIX ?: ""
                             echo "Listing objects with prefix: '${listPrefix}'"
                             
@@ -464,7 +465,7 @@ pipeline {
                                     --prefix "${listPrefix}" \
                                     --region ${params.REGION} \
                                     --output json | \
-                                jq -r '.Contents[]? | "${env.SOURCE_BUCKET}," + .Key' >> ${manifestLocalPath} || true
+                                jq -r '.Contents[]? | "\"${env.SOURCE_BUCKET}\",\"" + (.Key | gsub("\""; "\"\"")) + "\""' >> ${manifestLocalPath} || true
                             """
                             
                             // Check if manifest has any objects
