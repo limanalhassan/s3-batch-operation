@@ -606,19 +606,35 @@ pipeline {
                                 }
                                 
                                 // Break if not truncated (no more results) and no token
-                                if (!isTruncated && !continuationToken) {
+                                if (!isTruncated && !continuationToken && !lastKey) {
                                     echo "IsTruncated: false and no continuation token. Finished pagination after ${pageCount} pages."
                                     break
                                 }
                                 
-                                // If truncated but no token, that's an error condition
+                                // If truncated but no token, use --start-after with last key as fallback
                                 if (isTruncated && !continuationToken) {
-                                    error("ERROR: IsTruncated is true but no NextContinuationToken found. Cannot continue pagination.")
+                                    if (lastKey) {
+                                        echo "IsTruncated: true but no NextContinuationToken. Will use --start-after with last key: ${lastKey}"
+                                        // Continue with lastKey - it will be used in next iteration
+                                    } else {
+                                        // Try to get last key from current page
+                                        def currentLastKey = sh(
+                                            script: "jq -r '.Contents[-1].Key // empty' ${listJsonFile}",
+                                            returnStdout: true
+                                        ).trim()
+                                        
+                                        if (currentLastKey && currentLastKey != 'null' && currentLastKey != '') {
+                                            lastKey = currentLastKey
+                                            echo "Retrieved last key for --start-after: ${lastKey}"
+                                        } else {
+                                            error("ERROR: IsTruncated is true but no NextContinuationToken found and cannot get last key. Cannot continue pagination.")
+                                        }
+                                    }
                                 }
                                 
-                                // Continue to next page
-                                if (isTruncated || continuationToken) {
-                                    echo "Continuing to next page (IsTruncated: ${isTruncated}, has token: ${continuationToken ? 'yes' : 'no'})..."
+                                // Continue to next page if we have a way to continue
+                                if (isTruncated || continuationToken || lastKey) {
+                                    echo "Continuing to next page (IsTruncated: ${isTruncated}, has token: ${continuationToken ? 'yes' : 'no'}, has lastKey: ${lastKey ? 'yes' : 'no'})..."
                                 }
                             }
                             
