@@ -502,10 +502,20 @@ pipeline {
                                 }
                                 
                                 // Merge Contents into combined file
-                                def pageObjects = sh(
+                                def pageObjectsStr = sh(
                                     script: "jq -r '.Contents // [] | length' ${listJsonFile}",
                                     returnStdout: true
-                                ).trim().toInteger()
+                                ).trim()
+                                
+                                def pageObjects = 0
+                                if (pageObjectsStr && pageObjectsStr != 'null' && pageObjectsStr != '') {
+                                    try {
+                                        pageObjects = pageObjectsStr.toInteger()
+                                    } catch (NumberFormatException e) {
+                                        echo "WARNING: Could not parse page object count '${pageObjectsStr}', defaulting to 0"
+                                        pageObjects = 0
+                                    }
+                                }
                                 
                                 if (pageObjects > 0) {
                                     sh """
@@ -516,12 +526,15 @@ pipeline {
                                 }
                                 
                                 // Check for continuation token
-                                continuationToken = sh(
+                                def continuationTokenStr = sh(
                                     script: "jq -r '.NextContinuationToken // empty' ${listJsonFile}",
                                     returnStdout: true
                                 ).trim()
                                 
-                                if (!continuationToken || continuationToken == 'null' || continuationToken == '') {
+                                continuationToken = (continuationTokenStr && continuationTokenStr != 'null' && continuationTokenStr != '') ? continuationTokenStr : ""
+                                
+                                if (!continuationToken) {
+                                    echo "No continuation token found. Finished pagination."
                                     break
                                 }
                             }
