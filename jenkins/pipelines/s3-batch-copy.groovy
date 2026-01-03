@@ -636,45 +636,38 @@ pipeline {
                             
                             def jobOutput = ''
                             retry(3) {
-                                // Capture both stdout and stderr separately for better error handling
-                                echo "Executing command..."
-                                // Run command and capture both output and exit code
-                                def result = sh(
-                                    script: """
-                                        ${awsCmd} s3control create-job \\
-                                            --account-id ${env.ACCOUNT_NUMBER} \\
-                                            --operation file://${workspacePath}/operation.json \\
-                                            --manifest file://${workspacePath}/manifest.json \\
-                                            --report file://${workspacePath}/report.json \\
-                                            --priority ${params.PRIORITY} \\
-                                            --role-arn ${role3Arn} \\
-                                            --region ${params.REGION} \\
-                                            --no-confirmation-required \\
-                                            --output json 2>&1
-                                    """,
-                                    returnStdout: true,
-                                    returnStatus: true
-                                )
+                                // Run command ONCE and capture both output and exit code
+                                echo "Executing create-job command..."
                                 
-                                // result is an Integer (exit code) when returnStatus is true
-                                // We need to capture output separately
-                                jobOutput = sh(
-                                    script: """
-                                        ${awsCmd} s3control create-job \\
-                                            --account-id ${env.ACCOUNT_NUMBER} \\
-                                            --operation file://${workspacePath}/operation.json \\
-                                            --manifest file://${workspacePath}/manifest.json \\
-                                            --report file://${workspacePath}/report.json \\
-                                            --priority ${params.PRIORITY} \\
-                                            --role-arn ${role3Arn} \\
-                                            --region ${params.REGION} \\
-                                            --no-confirmation-required \\
-                                            --output json 2>&1 || true
-                                    """,
+                                // Use a temporary file to capture both stdout and exit code
+                                def outputFile = "${workspacePath}/create-job-output-${System.currentTimeMillis()}.json"
+                                def exitCodeFile = "${workspacePath}/create-job-exit-${System.currentTimeMillis()}.txt"
+                                
+                                sh """
+                                    ${awsCmd} s3control create-job \\
+                                        --account-id ${env.ACCOUNT_NUMBER} \\
+                                        --operation file://${workspacePath}/operation.json \\
+                                        --manifest file://${workspacePath}/manifest.json \\
+                                        --report file://${workspacePath}/report.json \\
+                                        --priority ${params.PRIORITY} \\
+                                        --role-arn ${role3Arn} \\
+                                        --region ${params.REGION} \\
+                                        --no-confirmation-required \\
+                                        --output json > ${outputFile} 2>&1
+                                    echo \$? > ${exitCodeFile}
+                                """
+                                
+                                // Read exit code
+                                def exitCode = sh(
+                                    script: "cat ${exitCodeFile}",
                                     returnStdout: true
-                                ).trim()
+                                ).trim().toInteger()
                                 
-                                def exitCode = result  // result is the exit code Integer
+                                // Read output
+                                jobOutput = readFile(outputFile).trim()
+                                
+                                // Clean up temp files
+                                sh "rm -f ${outputFile} ${exitCodeFile}"
                                 
                                 echo "=== COMMAND OUTPUT ==="
                                 echo "${jobOutput}"
