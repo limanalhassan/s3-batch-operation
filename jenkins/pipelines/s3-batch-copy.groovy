@@ -459,41 +459,30 @@ pipeline {
                             def listPrefix = params.SOURCE_PREFIX ?: ""
                             echo "Listing objects with prefix: '${listPrefix}'"
                             
-                            // First, verify we can list the bucket and get object count
-                            def listOutput = sh(
-                                script: """
-                                    ${awsCmd} s3api list-objects-v2 \
-                                        --bucket ${env.SOURCE_BUCKET} \
-                                        --prefix "${listPrefix}" \
-                                        --region ${params.REGION} \
-                                        --output json 2>&1
-                                """,
-                                returnStdout: true
-                            ).trim()
+                            // List objects and write to temporary JSON file for safer processing
+                            def listJsonFile = "${workspacePath}/list-objects-${System.currentTimeMillis()}.json"
+                            
+                            sh """
+                                ${awsCmd} s3api list-objects-v2 \
+                                    --bucket ${env.SOURCE_BUCKET} \
+                                    --prefix "${listPrefix}" \
+                                    --region ${params.REGION} \
+                                    --output json > ${listJsonFile} 2>&1 || {
+                                    echo "Failed to list objects"
+                                    cat ${listJsonFile}
+                                    exit 1
+                                }
+                            """
                             
                             // Check if command failed (stderr output or error in JSON)
+                            def listOutput = readFile(listJsonFile)
                             if (listOutput.contains('An error occurred') || listOutput.contains('AccessDenied') || listOutput.contains('NoSuchBucket')) {
                                 error("Failed to list objects from bucket ${env.SOURCE_BUCKET}. Output: ${listOutput}")
                             }
                             
-                            // Check if the output contains an error
-                            if (listOutput.contains('"Code"') && listOutput.contains('"Message"')) {
-                                def errorCode = sh(
-                                    script: "echo '${listOutput}' | jq -r '.Error.Code // .Code // empty' 2>/dev/null || echo ''",
-                                    returnStdout: true
-                                ).trim()
-                                def errorMsg = sh(
-                                    script: "echo '${listOutput}' | jq -r '.Error.Message // .Message // empty' 2>/dev/null || echo ''",
-                                    returnStdout: true
-                                ).trim()
-                                if (errorCode || errorMsg) {
-                                    error("Failed to list objects from bucket ${env.SOURCE_BUCKET}: ${errorCode} - ${errorMsg}")
-                                }
-                            }
-                            
                             // Count objects (handle case where Contents might be null or missing)
                             def objectCount = sh(
-                                script: "echo '${listOutput}' | jq -r 'if .Contents then (.Contents | length) else 0 end' 2>/dev/null || echo '0'",
+                                script: "jq -r 'if .Contents then (.Contents | length) else 0 end' ${listJsonFile}",
                                 returnStdout: true
                             ).trim()
                             
@@ -510,9 +499,11 @@ pipeline {
                             
                             // Generate manifest CSV with proper quoting
                             sh """
-                                echo '${listOutput}' | \
-                                jq -r 'if .Contents then (.Contents[]? | "\"${env.SOURCE_BUCKET}\",\"" + (.Key | gsub("\""; "\"\"")) + "\"") else empty end' > ${manifestLocalPath} 2>&1
+                                jq -r '.Contents[]? | "\"${env.SOURCE_BUCKET}\",\"" + (.Key | gsub("\""; "\"\"")) + "\""' ${listJsonFile} > ${manifestLocalPath}
                             """
+                            
+                            // Clean up temporary file
+                            sh "rm -f ${listJsonFile}"
                             
                             // Verify manifest was created correctly
                             def manifestLineCount = sh(
