@@ -421,7 +421,8 @@ pipeline {
                                 S3PutObjectCopy: [
                                     TargetResource: "arn:aws:s3:::${env.DEST_BUCKET}",
                                     CannedAccessControlList: "private",
-                                    MetadataDirective: "COPY"
+                                    MetadataDirective: "COPY",
+                                    ExpectedBucketOwner: "${env.ACCOUNT_NUMBER}"  // Required for security validation
                                 ]
                             ]
                             
@@ -437,7 +438,8 @@ pipeline {
                                 Prefix: "reports/",
                                 Format: "Report_CSV_20180820",
                                 Enabled: true,
-                                ReportScope: "AllTasks"
+                                ReportScope: "AllTasks",
+                                ExpectedBucketOwner: "${env.ACCOUNT_NUMBER}"  // Required for security validation
                             ]
                             
                             def workspacePath = sh(script: 'pwd', returnStdout: true).trim()
@@ -503,7 +505,8 @@ pipeline {
                                     ETag: sh(
                                         script: "${awsCmd} s3api head-object --bucket ${env.MANIFEST_BUCKET} --key ${manifestS3Key} --region ${params.REGION} --query ETag --output text | tr -d '\"'",
                                         returnStdout: true
-                                    ).trim()
+                                    ).trim(),
+                                    ExpectedManifestBucketOwner: "${env.ACCOUNT_NUMBER}"  // Required for security validation
                                 ]
                             ]
                             
