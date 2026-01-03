@@ -73,9 +73,13 @@
     {
       "Effect": "Allow",
       "Action": [
-        "s3control:CreateJob"
+        "s3control:CreateJob",
+        "s3:CreateJob"
       ],
-      "Resource": "*"
+      "Resource": [
+        "*",
+        "arn:aws:s3:*:*:job/*"
+      ]
     }
   ]
 }
