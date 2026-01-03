@@ -494,6 +494,13 @@ pipeline {
                                     error("Failed to list objects from bucket ${env.SOURCE_BUCKET}. Output: ${listOutput}")
                                 }
                                 
+                                // Debug: Show key fields from response
+                                def responseDebug = sh(
+                                    script: "jq '{IsTruncated, KeyCount, MaxKeys, NextContinuationToken: (.NextContinuationToken != null)}' ${listJsonFile}",
+                                    returnStdout: true
+                                ).trim()
+                                echo "Page ${pageCount} Response Debug: ${responseDebug}"
+                                
                                 // Merge Contents into combined file
                                 def pageObjectsStr = sh(
                                     script: "jq -r '.Contents // [] | length' ${listJsonFile}",
@@ -541,9 +548,27 @@ pipeline {
                                     echo "Page ${pageCount}: No NextContinuationToken"
                                 }
                                 
-                                // Break if not truncated (no more results)
-                                if (!isTruncated) {
-                                    echo "IsTruncated: false. Finished pagination after ${pageCount} pages."
+                                // Special case: If we got exactly 1000 objects (max page size),
+                                // there might be more objects even if IsTruncated is false
+                                // Check for continuation token in the response regardless of IsTruncated
+                                if (pageObjects == 1000) {
+                                    echo "Got exactly 1000 objects (max page size). Checking for continuation token..."
+                                    // Re-check for token - sometimes it's present even if IsTruncated is false
+                                    def tokenCheck = sh(
+                                        script: "jq -r 'if .NextContinuationToken then .NextContinuationToken else \"\" end' ${listJsonFile}",
+                                        returnStdout: true
+                                    ).trim()
+                                    
+                                    if (tokenCheck && tokenCheck != 'null' && tokenCheck != '') {
+                                        echo "Found continuation token despite IsTruncated=false. Continuing pagination..."
+                                        continuationToken = tokenCheck
+                                        isTruncated = true  // Force continuation
+                                    }
+                                }
+                                
+                                // Break if not truncated (no more results) and no token
+                                if (!isTruncated && !continuationToken) {
+                                    echo "IsTruncated: false and no continuation token. Finished pagination after ${pageCount} pages."
                                     break
                                 }
                                 
@@ -553,7 +578,9 @@ pipeline {
                                 }
                                 
                                 // Continue to next page
-                                echo "Continuing to next page (IsTruncated: true)..."
+                                if (isTruncated || continuationToken) {
+                                    echo "Continuing to next page (IsTruncated: ${isTruncated}, has token: ${continuationToken ? 'yes' : 'no'})..."
+                                }
                             }
                             
                             // Verify final count from merged file
