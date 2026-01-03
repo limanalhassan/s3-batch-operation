@@ -499,9 +499,10 @@ pipeline {
                             
                             // Generate manifest CSV with proper quoting
                             // Use jq with --arg to pass bucket name safely and avoid shell escaping issues
+                            // Escape backslashes properly for Groovy triple-quoted strings
                             sh """
-                                jq -r --arg bucket "${env.SOURCE_BUCKET}" '.Contents[]? | "\\"\($bucket)\\",\\"" + (.Key | gsub("\""; "\"\"")) + "\\""' ${listJsonFile} > ${manifestLocalPath} || {
-                                    echo "jq command failed with exit code: $?"
+                                jq -r --arg bucket '${env.SOURCE_BUCKET}' '.Contents[]? | "\\"" + \$bucket + "\\",\\"" + (.Key | gsub("\\""; "\\"\\"")) + "\\""' ${listJsonFile} > ${manifestLocalPath} || {
+                                    echo "jq command failed with exit code: \$?"
                                     echo "JSON file contents:"
                                     head -20 ${listJsonFile}
                                     exit 1
