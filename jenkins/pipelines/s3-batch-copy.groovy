@@ -463,6 +463,7 @@ pipeline {
                             """
                             
                             def continuationToken = ""
+                            def lastKey = null  // For --start-after fallback when token is missing
                             def pageCount = 0
                             def totalObjects = 0
                             
@@ -476,8 +477,14 @@ pipeline {
                                     listCmd += " --prefix \"${listPrefix}\""
                                 }
                                 
+                                // Use continuation token if available (preferred method)
                                 if (continuationToken) {
                                     listCmd += " --continuation-token '${continuationToken}'"
+                                    lastKey = null  // Clear lastKey when using token
+                                } else if (lastKey) {
+                                    // Fallback: use --start-after with last key from previous page
+                                    listCmd += " --start-after \"${lastKey}\""
+                                    echo "Using --start-after with last key from previous page: ${lastKey}"
                                 }
                                 
                                 sh """
@@ -576,20 +583,26 @@ pipeline {
                                 
                                 // Special case: If we got exactly 1000 objects (max page size),
                                 // there might be more objects even if IsTruncated is false
-                                // Check for continuation token in the response regardless of IsTruncated
+                                // Get the last key to use with --start-after for next page
                                 if (pageObjects == 1000) {
-                                    echo "Got exactly 1000 objects (max page size). Checking for continuation token..."
-                                    // Re-check for token - sometimes it's present even if IsTruncated is false
-                                    def tokenCheck = sh(
-                                        script: "jq -r 'if .NextContinuationToken then .NextContinuationToken else \"\" end' ${listJsonFile}",
+                                    def currentLastKey = sh(
+                                        script: "jq -r '.Contents[-1].Key // empty' ${listJsonFile}",
                                         returnStdout: true
                                     ).trim()
                                     
-                                    if (tokenCheck && tokenCheck != 'null' && tokenCheck != '') {
-                                        echo "Found continuation token despite IsTruncated=false. Continuing pagination..."
-                                        continuationToken = tokenCheck
-                                        isTruncated = true  // Force continuation
+                                    if (currentLastKey && currentLastKey != 'null' && currentLastKey != '') {
+                                        lastKey = currentLastKey
+                                        echo "Page ${pageCount}: Last key saved for potential --start-after: ${lastKey}"
+                                        
+                                        // If IsTruncated is false but we got max objects, force continuation
+                                        if (!isTruncated && !continuationToken) {
+                                            echo "Got exactly 1000 objects but IsTruncated=false. Will try --start-after in next iteration."
+                                            isTruncated = true  // Force continuation to try next page
+                                        }
                                     }
+                                } else {
+                                    // If we got fewer than 1000 objects, clear lastKey
+                                    lastKey = null
                                 }
                                 
                                 // Break if not truncated (no more results) and no token
