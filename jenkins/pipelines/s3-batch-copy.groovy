@@ -460,48 +460,58 @@ pipeline {
                             echo "Listing objects with prefix: '${listPrefix}'"
                             
                             // First, verify we can list the bucket and get object count
-                            def listResult = sh(
+                            def listOutput = sh(
                                 script: """
                                     ${awsCmd} s3api list-objects-v2 \
                                         --bucket ${env.SOURCE_BUCKET} \
                                         --prefix "${listPrefix}" \
                                         --region ${params.REGION} \
-                                        --output json
+                                        --output json 2>&1
                                 """,
                                 returnStdout: true
                             ).trim()
                             
-                            // Check for errors in the listing
-                            if (listResult.contains('"Code"') && listResult.contains('"Message"')) {
+                            // Check if command failed (stderr output or error in JSON)
+                            if (listOutput.contains('An error occurred') || listOutput.contains('AccessDenied') || listOutput.contains('NoSuchBucket')) {
+                                error("Failed to list objects from bucket ${env.SOURCE_BUCKET}. Output: ${listOutput}")
+                            }
+                            
+                            // Check if the output contains an error
+                            if (listOutput.contains('"Code"') && listOutput.contains('"Message"')) {
                                 def errorCode = sh(
-                                    script: "echo '${listResult}' | jq -r '.Code // empty'",
+                                    script: "echo '${listOutput}' | jq -r '.Error.Code // .Code // empty' 2>/dev/null || echo ''",
                                     returnStdout: true
                                 ).trim()
                                 def errorMsg = sh(
-                                    script: "echo '${listResult}' | jq -r '.Message // empty'",
+                                    script: "echo '${listOutput}' | jq -r '.Error.Message // .Message // empty' 2>/dev/null || echo ''",
                                     returnStdout: true
                                 ).trim()
-                                if (errorCode && errorMsg) {
+                                if (errorCode || errorMsg) {
                                     error("Failed to list objects from bucket ${env.SOURCE_BUCKET}: ${errorCode} - ${errorMsg}")
                                 }
                             }
                             
-                            // Count objects
+                            // Count objects (handle case where Contents might be null or missing)
                             def objectCount = sh(
-                                script: "echo '${listResult}' | jq -r '.Contents | length'",
+                                script: "echo '${listOutput}' | jq -r 'if .Contents then (.Contents | length) else 0 end' 2>/dev/null || echo '0'",
                                 returnStdout: true
-                            ).trim().toInteger()
+                            ).trim()
                             
-                            echo "Found ${objectCount} objects in bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}'"
+                            if (!objectCount || objectCount == 'null' || objectCount == '') {
+                                objectCount = '0'
+                            }
                             
-                            if (objectCount == 0) {
+                            def objectCountInt = objectCount.toInteger()
+                            echo "Found ${objectCountInt} objects in bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}'"
+                            
+                            if (objectCountInt == 0) {
                                 error("No objects found in source bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}'. Cannot create batch job with empty manifest.")
                             }
                             
                             // Generate manifest CSV with proper quoting
                             sh """
-                                echo '${listResult}' | \
-                                jq -r '.Contents[]? | "\"${env.SOURCE_BUCKET}\",\"" + (.Key | gsub("\""; "\"\"")) + "\""' > ${manifestLocalPath}
+                                echo '${listOutput}' | \
+                                jq -r 'if .Contents then (.Contents[]? | "\"${env.SOURCE_BUCKET}\",\"" + (.Key | gsub("\""; "\"\"")) + "\"") else empty end' > ${manifestLocalPath} 2>&1
                             """
                             
                             // Verify manifest was created correctly
