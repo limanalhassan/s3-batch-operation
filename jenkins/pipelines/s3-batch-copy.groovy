@@ -459,23 +459,59 @@ pipeline {
                             def listPrefix = params.SOURCE_PREFIX ?: ""
                             echo "Listing objects with prefix: '${listPrefix}'"
                             
+                            // First, verify we can list the bucket and get object count
+                            def listResult = sh(
+                                script: """
+                                    ${awsCmd} s3api list-objects-v2 \
+                                        --bucket ${env.SOURCE_BUCKET} \
+                                        --prefix "${listPrefix}" \
+                                        --region ${params.REGION} \
+                                        --output json
+                                """,
+                                returnStdout: true
+                            ).trim()
+                            
+                            // Check for errors in the listing
+                            if (listResult.contains('"Code"') && listResult.contains('"Message"')) {
+                                def errorCode = sh(
+                                    script: "echo '${listResult}' | jq -r '.Code // empty'",
+                                    returnStdout: true
+                                ).trim()
+                                def errorMsg = sh(
+                                    script: "echo '${listResult}' | jq -r '.Message // empty'",
+                                    returnStdout: true
+                                ).trim()
+                                if (errorCode && errorMsg) {
+                                    error("Failed to list objects from bucket ${env.SOURCE_BUCKET}: ${errorCode} - ${errorMsg}")
+                                }
+                            }
+                            
+                            // Count objects
+                            def objectCount = sh(
+                                script: "echo '${listResult}' | jq -r '.Contents | length'",
+                                returnStdout: true
+                            ).trim().toInteger()
+                            
+                            echo "Found ${objectCount} objects in bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}'"
+                            
+                            if (objectCount == 0) {
+                                error("No objects found in source bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}'. Cannot create batch job with empty manifest.")
+                            }
+                            
+                            // Generate manifest CSV with proper quoting
                             sh """
-                                ${awsCmd} s3api list-objects-v2 \
-                                    --bucket ${env.SOURCE_BUCKET} \
-                                    --prefix "${listPrefix}" \
-                                    --region ${params.REGION} \
-                                    --output json | \
-                                jq -r '.Contents[]? | "\"${env.SOURCE_BUCKET}\",\"" + (.Key | gsub("\""; "\"\"")) + "\""' >> ${manifestLocalPath} || true
+                                echo '${listResult}' | \
+                                jq -r '.Contents[]? | "\"${env.SOURCE_BUCKET}\",\"" + (.Key | gsub("\""; "\"\"")) + "\""' > ${manifestLocalPath}
                             """
                             
-                            // Check if manifest has any objects
+                            // Verify manifest was created correctly
                             def manifestLineCount = sh(
                                 script: "wc -l < ${manifestLocalPath} | tr -d ' '",
                                 returnStdout: true
                             ).trim().toInteger()
                             
-                            if (manifestLineCount <= 0) {
-                                error("No objects found in source bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix}'. Cannot create batch job with empty manifest.")
+                            if (manifestLineCount != objectCount) {
+                                error("Manifest line count (${manifestLineCount}) does not match object count (${objectCount})")
                             }
                             
                             echo "Manifest contains ${manifestLineCount} objects"
