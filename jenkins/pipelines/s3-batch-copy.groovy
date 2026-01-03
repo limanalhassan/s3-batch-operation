@@ -501,19 +501,31 @@ pipeline {
                                 ).trim()
                                 echo "Page ${pageCount} Response Debug: ${responseDebug}"
                                 
-                                // Also check raw response for IsTruncated (might be boolean, not string)
-                                def rawIsTruncated = sh(
-                                    script: "jq '.IsTruncated' ${listJsonFile}",
-                                    returnStdout: true
-                                ).trim()
-                                echo "Page ${pageCount} Raw IsTruncated value: ${rawIsTruncated} (type check)"
-                                
-                                // Check if response has the field at all
+                                // Check if IsTruncated field exists and its actual value
                                 def hasIsTruncated = sh(
                                     script: "jq 'has(\"IsTruncated\")' ${listJsonFile}",
                                     returnStdout: true
                                 ).trim()
                                 echo "Page ${pageCount} Has IsTruncated field: ${hasIsTruncated}"
+                                
+                                // Get actual IsTruncated value (handle boolean properly)
+                                def actualIsTruncated = sh(
+                                    script: "jq -r 'if .IsTruncated == true then \"true\" elif .IsTruncated == false then \"false\" else \"missing\" end' ${listJsonFile}",
+                                    returnStdout: true
+                                ).trim()
+                                echo "Page ${pageCount} Actual IsTruncated value: ${actualIsTruncated}"
+                                
+                                // Show top-level keys to understand response structure
+                                def topKeys = sh(
+                                    script: "jq 'keys | .[]' ${listJsonFile} | head -10",
+                                    returnStdout: true
+                                ).trim()
+                                echo "Page ${pageCount} Top-level keys: ${topKeys}"
+                                
+                                // If we got exactly 1000 objects and IsTruncated is missing/false, 
+                                // we should still try to get next page using the last key as marker
+                                // But list-objects-v2 uses continuation tokens, not markers
+                                // So if there's no token, we can't continue
                                 
                                 // Merge Contents into combined file
                                 def pageObjectsStr = sh(
