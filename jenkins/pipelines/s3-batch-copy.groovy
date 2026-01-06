@@ -728,7 +728,7 @@ pipeline {
                             writeFile file: 'operation.json', text: operationJson
                             writeFile file: 'report.json', text: reportJson
                             
-                            echo "Manifest file contains ${finalCount} objects"
+                            echo "Manifest file contains ${totalObjects} objects"
                             
                             def jobOutput = ''
                             retry(3) {
