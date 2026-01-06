@@ -464,11 +464,13 @@ pipeline {
                             
                             def continuationToken = ""
                             def lastKey = null  // For --start-after fallback when token is missing
+                            def previousLastKey = null  // Track previous lastKey to detect loops
                             def pageCount = 0
                             def totalObjects = 0
+                            def maxPages = 10000  // Safety limit to prevent infinite loops
                             
                             // Paginate through all objects
-                            while (true) {
+                            while (pageCount < maxPages) {
                                 pageCount++
                                 def listCmd = "${awsCmd} s3api list-objects-v2 --bucket ${env.SOURCE_BUCKET} --region ${params.REGION} --max-items 1000 --output json"
                                 
@@ -581,6 +583,29 @@ pipeline {
                                     echo "Page ${pageCount}: No NextContinuationToken"
                                 }
                                 
+                                // Break conditions:
+                                // 1. IsTruncated is false AND no continuation token AND no lastKey
+                                // 2. Using --start-after but got 0 objects (reached end)
+                                // 3. Using --start-after but got same lastKey (loop detection)
+                                
+                                // Check for loop: if using --start-after and got same lastKey again
+                                if (lastKey && previousLastKey && lastKey == previousLastKey && !continuationToken) {
+                                    echo "Loop detected: same lastKey returned (${lastKey}). Breaking pagination."
+                                    break
+                                }
+                                
+                                // If using --start-after and got 0 objects, we've reached the end
+                                if (lastKey && !continuationToken && pageObjects == 0) {
+                                    echo "Got 0 objects when using --start-after. Reached end of bucket."
+                                    break
+                                }
+                                
+                                // If using --start-after and got fewer than 1000 objects, we've reached the end
+                                if (lastKey && !continuationToken && pageObjects > 0 && pageObjects < 1000) {
+                                    echo "Got ${pageObjects} objects (< 1000) when using --start-after. Reached end of bucket."
+                                    break
+                                }
+                                
                                 // Special case: If we got exactly 1000 objects (max page size),
                                 // there might be more objects even if IsTruncated is false
                                 // Get the last key to use with --start-after for next page
@@ -591,21 +616,32 @@ pipeline {
                                     ).trim()
                                     
                                     if (currentLastKey && currentLastKey != 'null' && currentLastKey != '') {
+                                        previousLastKey = lastKey  // Save previous for loop detection
                                         lastKey = currentLastKey
                                         echo "Page ${pageCount}: Last key saved for potential --start-after: ${lastKey}"
                                         
-                                        // If IsTruncated is false but we got max objects, force continuation
+                                        // If IsTruncated is false but we got max objects, try one more page
+                                        // But only if we haven't seen this key before
                                         if (!isTruncated && !continuationToken) {
-                                            echo "Got exactly 1000 objects but IsTruncated=false. Will try --start-after in next iteration."
-                                            isTruncated = true  // Force continuation to try next page
+                                            if (lastKey == previousLastKey) {
+                                                echo "Got exactly 1000 objects but IsTruncated=false and same lastKey. Finished pagination."
+                                                break
+                                            } else {
+                                                echo "Got exactly 1000 objects but IsTruncated=false. Will try --start-after in next iteration."
+                                                // Don't force isTruncated=true, let the break condition handle it
+                                            }
                                         }
                                     }
                                 } else {
-                                    // If we got fewer than 1000 objects, clear lastKey
-                                    lastKey = null
+                                    // If we got fewer than 1000 objects, clear lastKey and break
+                                    if (pageObjects < 1000) {
+                                        echo "Got ${pageObjects} objects (< 1000). Finished pagination."
+                                        lastKey = null
+                                        break
+                                    }
                                 }
                                 
-                                // Break if not truncated (no more results) and no token
+                                // Break if not truncated (no more results) and no token and no lastKey
                                 if (!isTruncated && !continuationToken && !lastKey) {
                                     echo "IsTruncated: false and no continuation token. Finished pagination after ${pageCount} pages."
                                     break
@@ -624,6 +660,7 @@ pipeline {
                                         ).trim()
                                         
                                         if (currentLastKey && currentLastKey != 'null' && currentLastKey != '') {
+                                            previousLastKey = lastKey
                                             lastKey = currentLastKey
                                             echo "Retrieved last key for --start-after: ${lastKey}"
                                         } else {
@@ -635,7 +672,15 @@ pipeline {
                                 // Continue to next page if we have a way to continue
                                 if (isTruncated || continuationToken || lastKey) {
                                     echo "Continuing to next page (IsTruncated: ${isTruncated}, has token: ${continuationToken ? 'yes' : 'no'}, has lastKey: ${lastKey ? 'yes' : 'no'})..."
+                                } else {
+                                    echo "No way to continue pagination. Breaking."
+                                    break
                                 }
+                            }
+                            
+                            // Safety check: if we hit max pages, warn but continue
+                            if (pageCount >= maxPages) {
+                                echo "WARNING: Reached maximum page limit (${maxPages}). Stopping pagination. Some objects may be missing."
                             }
                             
                             // Verify final count from merged file
