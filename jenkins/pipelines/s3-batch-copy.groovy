@@ -739,28 +739,43 @@ pipeline {
                                 def outputFile = "${workspacePath}/create-job-output-${System.currentTimeMillis()}.json"
                                 def exitCodeFile = "${workspacePath}/create-job-exit-${System.currentTimeMillis()}.txt"
                                 
-                                sh """
-                                    ${awsCmd} s3control create-job \\
-                                        --account-id ${env.ACCOUNT_NUMBER} \\
-                                        --operation file://${workspacePath}/operation.json \\
-                                        --manifest file://${workspacePath}/manifest.json \\
-                                        --report file://${workspacePath}/report.json \\
-                                        --priority ${params.PRIORITY} \\
-                                        --role-arn ${role3Arn} \\
-                                        --region ${params.REGION} \\
-                                        --no-confirmation-required \\
-                                        --output json > ${outputFile} 2>&1
-                                    echo \$? > ${exitCodeFile}
-                                """
+                                // Run command and capture exit code without failing the step
+                                def shExitCode = sh(
+                                    script: """
+                                        set +e
+                                        ${awsCmd} s3control create-job \\
+                                            --account-id ${env.ACCOUNT_NUMBER} \\
+                                            --operation file://${workspacePath}/operation.json \\
+                                            --manifest file://${workspacePath}/manifest.json \\
+                                            --report file://${workspacePath}/report.json \\
+                                            --priority ${params.PRIORITY} \\
+                                            --role-arn ${role3Arn} \\
+                                            --region ${params.REGION} \\
+                                            --no-confirmation-required \\
+                                            --output json > ${outputFile} 2>&1
+                                        echo \$? > ${exitCodeFile}
+                                        set -e
+                                    """,
+                                    returnStatus: true
+                                )
                                 
-                                // Read exit code
-                                def exitCode = sh(
-                                    script: "cat ${exitCodeFile}",
-                                    returnStdout: true
-                                ).trim().toInteger()
+                                // Read exit code from file
+                                def actualExitCode = 0
+                                try {
+                                    def exitCodeStr = readFile(exitCodeFile).trim()
+                                    actualExitCode = exitCodeStr.toInteger()
+                                } catch (Exception e) {
+                                    echo "WARNING: Could not read exit code file: ${e.getMessage()}"
+                                    actualExitCode = 254  // Default AWS CLI error code
+                                }
                                 
                                 // Read output
-                                jobOutput = readFile(outputFile).trim()
+                                try {
+                                    jobOutput = readFile(outputFile).trim()
+                                } catch (Exception e) {
+                                    echo "WARNING: Could not read output file: ${e.getMessage()}"
+                                    jobOutput = "Error reading output file: ${e.getMessage()}"
+                                }
                                 
                                 // Clean up temp files
                                 sh "rm -f ${outputFile} ${exitCodeFile}"
@@ -770,8 +785,8 @@ pipeline {
                                 echo "=== END OUTPUT ==="
                                 
                                 // Check exit code
-                                if (exitCode != 0) {
-                                    echo "ERROR: Command failed with exit code ${exitCode}"
+                                if (actualExitCode != 0) {
+                                    echo "ERROR: Command failed with exit code ${actualExitCode}"
                                     
                                     // Try to extract detailed error message
                                     if (jobOutput.contains('An error occurred')) {
@@ -780,13 +795,13 @@ pipeline {
                                             echo "Error Type: ${errorMatch[0][1]}"
                                             echo "Error Message: ${errorMatch[0][2]}"
                                         } else {
-                                            echo "Output: ${jobOutput}"
+                                            echo "Full Output: ${jobOutput}"
                                         }
                                     } else {
-                                        echo "Output: ${jobOutput}"
+                                        echo "Full Output: ${jobOutput}"
                                     }
                                     
-                                    error("Failed to create S3 Batch Operations job")
+                                    error("Failed to create S3 Batch Operations job (exit code: ${actualExitCode})")
                                 }
                                 
                                 // Check if output contains error message (even if exit code was 0)
