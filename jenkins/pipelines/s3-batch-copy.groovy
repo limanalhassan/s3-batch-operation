@@ -453,13 +453,12 @@ pipeline {
                             echo "Listing objects with prefix: '${listPrefix}'"
                             
                             // List ALL objects with pagination to avoid duplicates
-                            // Use a temporary file to accumulate all objects across pages
-                            def allObjectsFile = "${workspacePath}/all-objects-${System.currentTimeMillis()}.json"
+                            // Write directly to manifest CSV to avoid memory issues with large buckets
                             def listJsonFile = "${workspacePath}/list-objects-${System.currentTimeMillis()}.json"
                             
-                            // Initialize combined results
+                            // Initialize manifest file (empty)
                             sh """
-                                echo '{"Contents":[]}' > ${allObjectsFile}
+                                > ${manifestLocalPath}
                             """
                             
                             def continuationToken = ""
@@ -553,8 +552,9 @@ pipeline {
                                 }
                                 
                                 if (pageObjects > 0) {
+                                    // Write objects directly to manifest CSV (memory-efficient)
                                     sh """
-                                        jq -s '[.[0].Contents + .[1].Contents] | {Contents: .[0]}' ${allObjectsFile} ${listJsonFile} > ${allObjectsFile}.tmp && mv ${allObjectsFile}.tmp ${allObjectsFile}
+                                        jq -r --arg bucket '${env.SOURCE_BUCKET}' '.Contents[]? | "\\"" + \$bucket + "\\",\\"" + (.Key | gsub("\\""; "\\"\\"")) + "\\""' ${listJsonFile} >> ${manifestLocalPath}
                                     """
                                     totalObjects += pageObjects
                                     echo "Page ${pageCount}: Found ${pageObjects} objects (total so far: ${totalObjects})"
@@ -668,40 +668,8 @@ pipeline {
                                 echo "WARNING: Reached maximum page limit (${maxPages}). Stopping pagination. Some objects may be missing."
                             }
                             
-                            // Verify final count from merged file
-                            def finalCountStr = sh(
-                                script: "jq -r '.Contents // [] | length' ${allObjectsFile}",
-                                returnStdout: true
-                            ).trim()
-                            
-                            def finalCount = 0
-                            if (finalCountStr && finalCountStr != 'null' && finalCountStr != '') {
-                                try {
-                                    finalCount = finalCountStr.toInteger()
-                                } catch (NumberFormatException e) {
-                                    echo "WARNING: Could not parse final object count '${finalCountStr}', using running total ${totalObjects}"
-                                    finalCount = totalObjects
-                                }
-                            }
-                            
-                            echo "Found ${finalCount} total objects in bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix ?: '(root)'}' (across ${pageCount} pages, running total was ${totalObjects})"
-                            
-                            if (finalCount == 0) {
-                                error("No objects found in source bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix ?: '(root)'}'. Cannot create batch job with empty manifest.")
-                            }
-                            
-                            // Generate manifest CSV with proper quoting from combined results
-                            sh """
-                                jq -r --arg bucket '${env.SOURCE_BUCKET}' '.Contents[]? | "\\"" + \$bucket + "\\",\\"" + (.Key | gsub("\\""; "\\"\\"")) + "\\""' ${allObjectsFile} > ${manifestLocalPath} || {
-                                    echo "jq command failed with exit code: \$?"
-                                    echo "JSON file contents:"
-                                    head -20 ${allObjectsFile}
-                                    exit 1
-                                }
-                            """
-                            
-                            // Clean up temporary files
-                            sh "rm -f ${listJsonFile} ${allObjectsFile}"
+                            // Clean up temporary JSON file (manifest CSV already written)
+                            sh "rm -f ${listJsonFile}"
                             
                             // Verify manifest was created correctly
                             def manifestLineCount = sh(
@@ -709,11 +677,16 @@ pipeline {
                                 returnStdout: true
                             ).trim().toInteger()
                             
-                            echo "Manifest contains ${manifestLineCount} lines (expected ${finalCount} objects)"
+                            echo "Found ${totalObjects} total objects in bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix ?: '(root)'}' (across ${pageCount} pages)"
+                            echo "Manifest contains ${manifestLineCount} lines"
                             
-                            // Warn if counts don't match, but don't fail (manifest generation should be correct)
-                            if (manifestLineCount != finalCount) {
-                                echo "WARNING: Manifest line count (${manifestLineCount}) does not exactly match object count (${finalCount}), but proceeding..."
+                            if (totalObjects == 0) {
+                                error("No objects found in source bucket ${env.SOURCE_BUCKET} with prefix '${listPrefix ?: '(root)'}'. Cannot create batch job with empty manifest.")
+                            }
+                            
+                            // Warn if counts don't match, but don't fail (should match if pagination worked correctly)
+                            if (manifestLineCount != totalObjects) {
+                                echo "WARNING: Manifest line count (${manifestLineCount}) does not exactly match object count (${totalObjects}), but proceeding..."
                             }
                             
                             // Upload manifest to S3
